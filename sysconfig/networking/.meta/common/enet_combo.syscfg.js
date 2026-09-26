@@ -564,9 +564,10 @@ function validate(instance, report)
                 }
             }
         }
-        if (numDefault > 1)
+        /* Replaces the per-instance default netif check of each module */
+        if (numDefault != 1)
         {
-            report.logError("Only one netif of Enet (ICSS) and Enet (CPSW) can be the default netif " +
+            report.logError("Exactly one netif of Enet (ICSS) and Enet (CPSW) must be the default netif " +
                             "when CPSW and ICSSG are used together on one core", instance, "netifInstance");
         }
     }

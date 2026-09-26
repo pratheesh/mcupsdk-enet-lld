@@ -846,7 +846,10 @@ function validate(instance, report) {
         }
         if (numNetifsCount > 0)
         {
-            if (getDefaultNetifCount(instance) !=1)
+            /* With CPSW on the same core, enet_combo checks the default
+             * netif over both modules */
+            if ((getDefaultNetifCount(instance) !=1) &&
+                !system.getScript("/networking/common/enet_combo").isComboMode())
             {
                 report.logError(`Only one netif can be set as default`, instance, "netifInstance");
             }
