@@ -2,8 +2,15 @@
     /* CPSW + ICSSG on one core: totals over both peripherals, used by the
      * packet / DMA memory generated once for both (see enet_combo) */
     let combo = system.getScript("/networking/common/enet_combo");
+    /* Pool packet sizes: largest over the instances that use the packet pool */
     let instances = combo.getPktPoolInstances();
+    if (instances.length === 0)
+    {
+        instances = combo.getModuleInstances(combo.icssModuleName);
+    }
     let maxOf = (cfg) => Math.max(...instances.map((inst) => Number(inst[cfg])));
+    let icssInst = combo.getModuleInstances(combo.icssModuleName)[0];
+    let defaultNetif = combo.getDefaultNetif();
 %%}
 
 /* ========================================================================== */
@@ -18,9 +25,14 @@
 #define ENET_SYSCFG_RING_MON_NUM            (ENET_SYSCFG_RING_MON_NUM_ICSSG + ENET_SYSCFG_RING_MON_NUM_CPSW)
 #define ENET_SYSCFG_MAX_MAC_PORTS           ((ENET_SYSCFG_MAX_MAC_PORTS_ICSSG > ENET_SYSCFG_MAX_MAC_PORTS_CPSW) ? \
                                              ENET_SYSCFG_MAX_MAC_PORTS_ICSSG : ENET_SYSCFG_MAX_MAC_PORTS_CPSW)
-#define ENET_SYSCFG_PKT_POOL_ENABLE         (ENET_SYSCFG_PKT_POOL_ENABLE_ICSSG)
-#define ENET_SYSCFG_PKT_INFO_ONLY_ENABLE    (ENET_SYSCFG_PKT_INFO_ONLY_ENABLE_ICSSG)
-#define ENET_SYSCFG_NETIF_COUNT             (0U)
+#define ENET_SYSCFG_PKT_POOL_ENABLE         (`Number(combo.isPktPoolEnabled(icssInst))`U)
+#define ENET_SYSCFG_PKT_INFO_ONLY_ENABLE    (`Number(combo.isPktInfoOnlyEnabled(icssInst))`U)
+
+/* lwIP netifs: ICSSG netifs first, then CPSW netifs */
+#define ENET_SYSCFG_NETIF_COUNT             (ENET_SYSCFG_NETIF_COUNT_ICSSG + ENET_SYSCFG_NETIF_COUNT_CPSW)
+% if (defaultNetif !== null) {
+#define ENET_SYSCFG_DEFAULT_NETIF_IDX       (`defaultNetif.name.toUpperCase()`)
+% }
 
 #define ENET_MEM_LARGE_POOL_PKT_SIZE        ENET_UTILS_ALIGN(`maxOf("LargePoolPktSize")`U, ENET_UTILS_CACHELINE_SIZE)
 #define ENET_MEM_MEDIUM_POOL_PKT_SIZE       ENET_UTILS_ALIGN(`maxOf("MediumPoolPktSize")`U, ENET_UTILS_CACHELINE_SIZE)

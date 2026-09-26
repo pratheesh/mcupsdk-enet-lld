@@ -4,3 +4,6 @@
     let combo = system.getScript("/networking/common/enet_combo");
 %%}
 `combo.renderBoardTemplate(combo.icssModuleName, "/board/ethphy_cpsw_icssg/templates/am64x_am243x/ethphy_icssg_board_cfg.h.xdt")`
+% if (combo.isComboMode()) {
+`combo.renderComboTemplate("board_config_h")`
+% }

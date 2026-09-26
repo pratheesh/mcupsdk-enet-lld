@@ -263,17 +263,28 @@ int32_t EnetApp_driverOpen(Enet_Type enetType, uint32_t instId)
                                          EnetApp_driverOpen_Icssg(enetType, instId);
 }
 
-% let mcmEnable = combo.getModuleInstances(combo.icssModuleName)[0].McmEnable;
-% if (mcmEnable == false) {
+% let icssgMcm = combo.isMcmEnabled(combo.icssModuleName);
+% let cpswMcm  = combo.isMcmEnabled(combo.cpswModuleName);
+% if (!icssgMcm || !cpswMcm) {
 void EnetApp_driverClose(Enet_Type enetType, uint32_t instId)
 {
     if (Enet_isCpswFamily(enetType))
     {
+%   if (cpswMcm) {
+        /* CPSW has MCM enabled: its driver is closed by MCM */
+        EnetAppUtils_assert(false);
+%   } else {
         EnetApp_driverClose_Cpsw(enetType, instId);
+%   }
     }
     else
     {
+%   if (icssgMcm) {
+        /* ICSSG has MCM enabled: its driver is closed by MCM */
+        EnetAppUtils_assert(false);
+%   } else {
         EnetApp_driverClose_Icssg(enetType, instId);
+%   }
     }
 }
 % }

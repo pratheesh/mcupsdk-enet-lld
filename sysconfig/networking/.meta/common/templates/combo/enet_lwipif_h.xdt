@@ -1,0 +1,25 @@
+%%{
+    /* CPSW + ICSSG on one core: public lwIP interface API (see enet_lwipif_c.xdt) */
+%%}
+
+/* ========================================================================== */
+/*          CPSW + ICSSG on one core: lwIP interface for both peripherals     */
+/* ========================================================================== */
+
+/*
+ * Netif indices are global: the ICSSG netifs come first, followed by the CPSW
+ * netifs. Use the netif name macros from ti_enet_config.h.
+ */
+typedef void* LwipifEnetApp_Handle;
+
+LwipifEnetApp_Handle LwipifEnetApp_getHandle(void);
+
+struct netif* LwipifEnetApp_netifOpen(LwipifEnetApp_Handle handle, uint32_t netifIdx, const ip4_addr_t *ipaddr, const ip4_addr_t *netmask, const ip4_addr_t *gw);
+
+void LwipifEnetApp_netifClose(LwipifEnetApp_Handle handle, const uint32_t netifIdx);
+
+struct netif* LwipifEnetApp_getNetifFromId(LwipifEnetApp_Handle handle, uint32_t netifIdx);
+
+int32_t LwipifEnetApp_getNetifIdx(LwipifEnetApp_Handle handle, struct netif* netif);
+
+void LwipifEnetApp_startSchedule(LwipifEnetApp_Handle handle, struct netif *netif);

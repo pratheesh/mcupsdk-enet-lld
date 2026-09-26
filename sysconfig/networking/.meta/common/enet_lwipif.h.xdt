@@ -45,6 +45,9 @@
 `combo.renderSubTemplate(subTemplate, "enet_lwipif")`
     % }
 % }
+% if (combo.isComboMode() && (combo.getModuleNetifCount(combo.icssModuleName) + combo.getModuleNetifCount(combo.cpswModuleName) > 0)) {
+`combo.renderComboTemplate("enet_lwipif_h")`
+% }
 % if (combo.isComboMode()) {
 #endif /* TI_ENET_LWIPIF_H_COMBO_ */
 % }

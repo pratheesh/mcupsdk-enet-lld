@@ -5,12 +5,17 @@
     let common = system.getScript("/common");
     let module = system.modules["/board/ethphy_cpsw_icssg/ethphy_cpsw_icssg"];
     let uniqueDevices = ethphyScript.getUniqueLinkedEthphy(module);
+    let combo = system.getScript("/networking/common/enet_combo");
+    /* With a custom board the application provides the PHY driver table */
+    let anyCustomBoard = combo.hasCustomBoard(combo.icssModuleName) ||
+                         combo.hasCustomBoard(combo.cpswModuleName);
 %%}
 
 /* ========================================================================== */
 /*          CPSW + ICSSG on one core: board API for both peripherals          */
 /* ========================================================================== */
 
+% if (!anyCustomBoard) {
 % for (let phyDevice of uniqueDevices) {
 extern Phy_DrvObj_t gEnetPhyDrv`common.camelSentence(phyDevice)`;
 % }
@@ -30,6 +35,7 @@ const EnetPhy_DrvInfoTbl gEnetPhyDrvTbl =
     .numHandles = ENET_ARRAYSIZE(gEnetPhyDrvs),
     .hPhyDrvList = gEnetPhyDrvs,
 };
+% }
 
 const EnetBoard_PhyCfg *EnetBoard_getPhyCfg_Icssg(const EnetBoard_EthPort *ethPort);
 const EnetBoard_PhyCfg *EnetBoard_getPhyCfg_Cpsw(const EnetBoard_EthPort *ethPort);
