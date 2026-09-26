@@ -7,6 +7,11 @@
 %%}
 % let instance = module.$instances[0];
 % let instances = module.$instances;
+% /* Non-zero only when ICSSG is used on the same core, see /networking/common/enet_combo */
+% let combo = system.getScript("/networking/common/enet_combo");
+% let instOffset = combo.getCpswInstanceOffset();
+% let txChOffset = combo.getCpswTxChannelOffset();
+% let rxChOffset = combo.getCpswRxChannelOffset();
 
 /* ========================================================================== */
 /*                         Macros & Typedefs                                  */
@@ -15,7 +20,7 @@
 /* ENET Pheriphel instance indexes. Name of ENET PHERIPHERAL can be changed in example syscfg */
 /* Application should use the defines below when opening a ENET Driver */
 % for (var i = 0; i < instances.length; i++) {
-#define `instances[i].$name.toUpperCase()`       (`i`U)
+#define `instances[i].$name.toUpperCase()`       (`i + instOffset`U)
 % }
 #define ENET_SYSCFG_MAX_ENET_INSTANCES           (`instances.length`U)
 
@@ -41,13 +46,13 @@
 /* TX DMA Channel indexes. Name of TX DMA channel can be changed in example syscfg */
 /* Application should use the define below when opening a Tx DMA channel */
 % for(let i = 0; i < module.getTxChannelCount(instance); i++) {
-#define `module.getChannelConfig(instance, "TX", i).$name.toUpperCase()`          (`i`U)
+#define `module.getChannelConfig(instance, "TX", i).$name.toUpperCase()`          (`i + txChOffset`U)
 % }
 
 /* RX DMA Channel indexes. Name of RX DMA channel can be changed in example syscfg */
 /* Application should use the define below when opening a Rx DMA channel */
 % for(let i = 0; i < module.getRxChannelCount(instance); i++) {
-#define `module.getChannelConfig(instance, "RX", i).$name.toUpperCase()`          (`i`U)
+#define `module.getChannelConfig(instance, "RX", i).$name.toUpperCase()`          (`i + rxChOffset`U)
 % }
 
 /* TX DMA max num packets allocated to the DMA channel */

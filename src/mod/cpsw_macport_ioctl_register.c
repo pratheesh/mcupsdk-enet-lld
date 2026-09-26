@@ -57,6 +57,11 @@
 #include "cpsw_macport_intervlan.h"
 #if ENET_CFG_IS_ON(CPSW_MACPORT_EST)
 #include "cpsw_macport_est.h"
+
+/* Renames the register functions shared with the other Ethernet peripheral
+ * family when both are built into one library. No-op otherwise. */
+#define ENET_IOCTL_REGISTER_PER_CPSW
+#include <priv/core/enet_ioctl_register_multi_priv.h>
 #endif
 
 /* ========================================================================== */
