@@ -808,6 +808,7 @@ function validateInstances(instance, report) {
 }
 
 function validate(instance, report) {
+    system.getScript("/networking/common/enet_combo").validate(instance, report);
     pktPoolScript.validate(instance, report);
     mdioScript.validate(instance, report);
     timesyncScript.validate(instance, report);
@@ -1047,10 +1048,10 @@ function getCpuInfo() {
 function getBoardConfigTemplateInfo(instance) {
 	const boardConfigTemplate = new Map(
 								[
-								  ['am64x',{Cfile: `/board/ethphy_cpsw_icssg/templates/am64x_am243x/ethphy_icssg_board_cfg.c.xdt`,
-								   Header: "/board/ethphy_cpsw_icssg/templates/am64x_am243x/ethphy_icssg_board_cfg.h.xdt",}],
-								  ['am243x',{Cfile: "/board/ethphy_cpsw_icssg/templates/am64x_am243x/ethphy_icssg_board_cfg.c.xdt",
-								   Header: "/board/ethphy_cpsw_icssg/templates/am64x_am243x/ethphy_icssg_board_cfg.h.xdt"}],
+								  ['am64x',{Cfile: `/board/ethphy_cpsw_icssg/templates/am64x_am243x/ethphy_icssg_board_cfg_combo.c.xdt`,
+								   Header: "/board/ethphy_cpsw_icssg/templates/am64x_am243x/ethphy_icssg_board_cfg_combo.h.xdt",}],
+								  ['am243x',{Cfile: "/board/ethphy_cpsw_icssg/templates/am64x_am243x/ethphy_icssg_board_cfg_combo.c.xdt",
+								   Header: "/board/ethphy_cpsw_icssg/templates/am64x_am243x/ethphy_icssg_board_cfg_combo.h.xdt"}],
 								  ['awr294x',{Cfile: "/board/ethphy_cpsw_icssg/templates/awr294x/ethphy_icssg_board_cfg.c.xdt",
 								   Header: "/board/ethphy_cpsw_icssg/templates/awr294x/ethphy_icssg_board_cfg.h.xdt"}],
 								  ['am273x', {Cfile: "/board/ethphy_cpsw_icssg/templates/am273x/ethphy_icssg_board_cfg.c.xdt",

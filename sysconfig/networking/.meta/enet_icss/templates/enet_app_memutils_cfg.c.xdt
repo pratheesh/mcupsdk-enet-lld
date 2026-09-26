@@ -3,6 +3,8 @@
     let instance = module.$instances[0];
     let instances = module.$instances;
     let pktPoolScript = system.getScript("../enet_pkt_pool_config");
+    /* Includes the Enet (CPSW) instances when CPSW is used on the same core */
+    let poolInstances = system.getScript("/networking/common/enet_combo").getPktPoolInstances();
 %%}
 /*
  * Enet DMA memory allocation utility functions.
@@ -38,10 +40,10 @@
 #include <networking/enet/core/src/dma/udma/enet_udma_priv.h>
 /* --------------------------------- ICSS-G MACROS --------------------------------- */
 
-#define ENET_MEM_LARGE_POOL_NUM_PKTS        (`Number(pktPoolScript.getLargePoolNumPkts(instances))`U)
-#define ENET_MEM_MEDIUM_POOL_NUM_PKTS       (`Number(pktPoolScript.getMediumPoolNumPkts(instances))`U)
-#define ENET_MEM_SMALL_POOL_NUM_PKTS        (`Number(pktPoolScript.getSmallPoolNumPkts(instances))`U)
-#define ENET_PKTINFOMEM_ONLY_NUM_PKTS       (`Number(pktPoolScript.getPktInfoNum(instances))`U)
+#define ENET_MEM_LARGE_POOL_NUM_PKTS        (`Number(pktPoolScript.getLargePoolNumPkts(poolInstances))`U)
+#define ENET_MEM_MEDIUM_POOL_NUM_PKTS       (`Number(pktPoolScript.getMediumPoolNumPkts(poolInstances))`U)
+#define ENET_MEM_SMALL_POOL_NUM_PKTS        (`Number(pktPoolScript.getSmallPoolNumPkts(poolInstances))`U)
+#define ENET_PKTINFOMEM_ONLY_NUM_PKTS       (`Number(pktPoolScript.getPktInfoNum(poolInstances))`U)
 
 
 /* ========================================================================== */
