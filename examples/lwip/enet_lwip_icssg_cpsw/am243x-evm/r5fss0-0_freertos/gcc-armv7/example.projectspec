@@ -10,8 +10,8 @@
     </applicability>
 
     <project
-        title="Enet Layer2 Icssg Cpsw"
-        name = "enet_layer2_icssg_cpsw_am243x-evm_r5fss0-0_freertos_gcc-armv7"
+        title="Enet Lwip Icssg Cpsw"
+        name = "enet_lwip_icssg_cpsw_am243x-evm_r5fss0-0_freertos_gcc-armv7"
         products="sysconfig;com.ti.MCU_PLUS_SDK_AMXXX"
         configurations="
                 Debug,
@@ -47,6 +47,12 @@
             -I${MCU_PLUS_SDK_PATH}/source/networking/enet/soc/k3/am64x_am243x
             -I${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include
             -I${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/mdio/V4
+            -I${MCU_PLUS_SDK_PATH}/source/networking/lwip/lwip-stack/src/include
+            -I${MCU_PLUS_SDK_PATH}/source/networking/lwip/lwip-port/include
+            -I${MCU_PLUS_SDK_PATH}/source/networking/lwip/lwip-port/freertos/include
+            -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core/lwipif/inc
+            -I${MCU_PLUS_SDK_PATH}/source/networking/lwip/lwip-contrib
+            -I${MCU_PLUS_SDK_PATH}/source/networking/lwip/lwip-config/am243x
             -mcpu=cortex-r5
             -mfloat-abi=hard
             -mfpu=vfpv3-d16
@@ -76,9 +82,10 @@
             -L${MCU_PLUS_SDK_PATH}/source/drivers/lib
             -L${MCU_PLUS_SDK_PATH}/source/board/lib
             -L${MCU_PLUS_SDK_PATH}/source/networking/enet/lib
+            -L${MCU_PLUS_SDK_PATH}/source/networking/lwip/lib
             -L${CGT_GCC_ARMV7_PATH}/lib
             -i${PROJECT_BUILD_DIR}/syscfg
-            -Wl,-Map=enet_layer2_icssg_cpsw.${ConfigName}.map
+            -Wl,-Map=enet_lwip_icssg_cpsw.${ConfigName}.map
             -mcpu=cortex-r5
             -mfloat-abi=hard
             -mfpu=vfpv3-d16
@@ -99,7 +106,7 @@
             --context r5fss0-0 --part ALV --package ALV
         "
 
-        description="A Icssg Layer2 Dualmac FREERTOS project">
+        description="A Enet Lwip Icssg Cpsw FREERTOS project">
 
         <configuration name="Debug"
             compilerBuildOptions="
@@ -108,8 +115,11 @@
             linkerBuildOptions="
                 -lfreertos.am243x.r5f.gcc-armv7.debug.lib
                 -ldrivers.am243x.r5f.gcc-armv7.freertos.debug.lib
-                -lenet-cpsw-icssg.am243x.r5f.gcc-armv7.freertos.debug.lib
                 -lboard.am243x.r5f.gcc-armv7.freertos.debug.lib
+                -lenet-cpsw-icssg.am243x.r5f.gcc-armv7.freertos.debug.lib
+                -llwipif-cpsw-icssg-freertos.am243x.r5f.gcc-armv7.debug.lib
+                -llwip-freertos.am243x.r5f.gcc-armv7.debug.lib
+                -llwip-contrib-freertos.am243x.r5f.gcc-armv7.debug.lib
             "
         ></configuration>
         <configuration name="Release"
@@ -119,20 +129,29 @@
             linkerBuildOptions="
                 -lfreertos.am243x.r5f.gcc-armv7.release.lib
                 -ldrivers.am243x.r5f.gcc-armv7.freertos.release.lib
-                -lenet-cpsw-icssg.am243x.r5f.gcc-armv7.freertos.release.lib
                 -lboard.am243x.r5f.gcc-armv7.freertos.release.lib
+                -lenet-cpsw-icssg.am243x.r5f.gcc-armv7.freertos.release.lib
+                -llwipif-cpsw-icssg-freertos.am243x.r5f.gcc-armv7.release.lib
+                -llwip-freertos.am243x.r5f.gcc-armv7.release.lib
+                -llwip-contrib-freertos.am243x.r5f.gcc-armv7.release.lib
             "
         ></configuration>
         <pathVariable name="MCU_PLUS_SDK_PATH" path="${COM_TI_MCU_PLUS_SDK_AMXXX_INSTALL_DIR}" scope="project" />
-        <file path="../../../enet_layer2_icssg_cpsw.c" openOnCreation="false" excludeFromBuild="false" action="copy">
+        <file path="../../../app_main.c" openOnCreation="false" excludeFromBuild="false" action="copy">
+        </file>
+        <file path="../../../app_enetconfighandler.c" openOnCreation="false" excludeFromBuild="false" action="copy">
+        </file>
+        <file path="../../../app_tcpserver.c" openOnCreation="false" excludeFromBuild="false" action="copy">
         </file>
         <file path="../main.c" openOnCreation="false" excludeFromBuild="false" action="copy">
+        </file>
+        <file path="../../../app_tcpserver.h" openOnCreation="false" excludeFromBuild="false" action="copy">
         </file>
         <file path="linker.cmd" openOnCreation="false" excludeFromBuild="false" action="copy">
         </file>
         <file path="../example.syscfg" openOnCreation="false" excludeFromBuild="false" action="copy">
         </file>
-        <file path="${MCU_PLUS_SDK_PATH}/docs/api_guide_am243x/EXAMPLES_ENET_LAYER2_ICSSG.html"
+        <file path="${MCU_PLUS_SDK_PATH}/docs/api_guide_am243x/EXAMPLES_ENET_LWIP_ICSSG_CPSW.html"
                 openOnCreation="false" excludeFromBuild="false" targetName="README.html" action="link">
         </file>
         <file path="syscfg_c.rov.xs" openOnCreation="false" excludeFromBuild="false" action="copy">

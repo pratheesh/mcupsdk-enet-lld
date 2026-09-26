@@ -24,12 +24,19 @@ When both are present, the Enet SysConfig scripts switch to *combo mode*
 - Enet instance and DMA channel indices are global: ICSSG first, then CPSW.
 - Packet memory and the packet pool are shared and sized for both.
 
-Combo mode currently has these limits:
+Settings that may differ between the ICSSG and CPSW instances:
 
-- lwIP netifs are not supported (set the netif count to 0 on both modules).
-- A custom board configuration is not supported.
-- Packet pool, packet-info-only, MCM and RTOS variant settings must match
-  between the ICSSG and CPSW instances.
+- Packet pool and packet-info-only memory: the single packet pool is enabled
+  when any instance enables it and is sized for every instance that does.
+- Custom board: a module with `customBoardEnable` generates no board code; the
+  application then provides that module's board functions with the module
+  suffix (for example `EnetBoard_getPhyCfg_Cpsw()`) and the PHY driver table
+  `gEnetPhyDrvTbl`. `ti_board_config.h` lists the functions to provide.
+- MCM: enabled per module. `enet_mcm.c` keeps one MCM per peripheral family
+  when both are built, and an MCM manages one Enet instance.
+- lwIP netifs: see `examples/lwip/enet_lwip_icssg_cpsw`.
+
+The RTOS variant must be the same for both modules.
 
 The application must link `enet-cpsw-icssg.am243x.r5f.<cgt>.freertos.<profile>.lib`
 and build with both `ENET_ENABLE_PER_CPSW` and `ENET_ENABLE_PER_ICSSG` defined.
