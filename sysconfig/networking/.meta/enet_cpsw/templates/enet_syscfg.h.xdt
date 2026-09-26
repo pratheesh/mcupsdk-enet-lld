@@ -12,6 +12,7 @@
 % let instOffset = combo.getCpswInstanceOffset();
 % let txChOffset = combo.getCpswTxChannelOffset();
 % let rxChOffset = combo.getCpswRxChannelOffset();
+% let netifOffset = combo.getCpswNetifOffset();
 
 /* ========================================================================== */
 /*                         Macros & Typedefs                                  */
@@ -73,12 +74,12 @@
 % var idx = 0;
 % for (let inst in instances) {
 % for (let i = 0; i < module.getNetifCount(instances[inst]); i++) {
-#define `module.getNetifConfig(instances[inst], i).$name.toUpperCase()`          (`idx`U)
+#define `module.getNetifConfig(instances[inst], i).$name.toUpperCase()`          (`idx + netifOffset`U)
 % idx++;
 % }
 % }
 #define ENET_SYSCFG_NETIF_COUNT                    (`netifScript.getTotalNetIfCount(instances)`U)
-#define ENET_SYSCFG_DEFAULT_NETIF_IDX              (`netifScript.getDefaultNetifIndex()`)
+#define ENET_SYSCFG_DEFAULT_NETIF_IDX              (`combo.getModuleDefaultNetifIdx(module.$name, netifScript.getDefaultNetifIndex())`)
 /*
  * Packet sizes for different pools. LARGE_POOL is largest packet size pool with MEDIUM_POOL
  * second largest and SMALL_POOL smallest
