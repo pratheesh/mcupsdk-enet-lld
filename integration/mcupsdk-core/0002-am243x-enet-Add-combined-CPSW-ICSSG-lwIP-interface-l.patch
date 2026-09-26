@@ -1,0 +1,784 @@
+From 3743d12f5cdcb5129de0b5fadc291c36af1039f9 Mon Sep 17 00:00:00 2001
+From: tmp <tmp@x>
+Date: Sat, 26 Sep 2026 18:24:34 +0000
+Subject: [PATCH] am243x: enet: Add combined CPSW + ICSSG lwIP interface
+ library and lwIP example
+
+Add the lwipif-cpsw-icssg-freertos library, built with both
+ENET_ENABLE_PER_CPSW and ENET_ENABLE_PER_ICSSG, and register the
+enet_lwip_icssg_cpsw example for am243x-evm r5fss0-0 FreeRTOS.
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01DbJ6cEKniwyDR9YBttBJEK
+---
+ .metadata/.tirex/am243x.content.tirex.json    |  38 +++++
+ .project/common.js                            |   1 +
+ .project/device/project_am243x.js             |   2 +
+ makefile.am243x                               |  33 +++-
+ makefile_projectspec.am243x                   |  13 ++
+ .../project_cpsw_icssg_lwipif_freertos.js     | 125 ++++++++++++++
+ ...f-cpsw-icssg-freertos.am243x.r5f.gcc-armv7 | 145 ++++++++++++++++
+ ...psw-icssg-freertos.am243x.r5f.ti-arm-clang | 156 ++++++++++++++++++
+ 8 files changed, 510 insertions(+), 3 deletions(-)
+ create mode 100644 source/networking/enet/.project/project_cpsw_icssg_lwipif_freertos.js
+ create mode 100644 source/networking/enet/makefile.lwipif-cpsw-icssg-freertos.am243x.r5f.gcc-armv7
+ create mode 100644 source/networking/enet/makefile.lwipif-cpsw-icssg-freertos.am243x.r5f.ti-arm-clang
+
+diff --git a/.metadata/.tirex/am243x.content.tirex.json b/.metadata/.tirex/am243x.content.tirex.json
+index f3d746cd2..1870e8fc4 100644
+--- a/.metadata/.tirex/am243x.content.tirex.json
++++ b/.metadata/.tirex/am243x.content.tirex.json
+@@ -16522,6 +16522,44 @@
+             ]
+         ]
+     },
++    {
++        "resourceType": "project.ccs",
++        "resourceClass": [
++            "example"
++        ],
++        "resourceSubClass": [
++            "example.general"
++        ],
++        "description": "A Enet Lwip Icssg Cpsw Example. CPU is R5FSS0-0 running FREERTOS.",
++        "name": "enet_lwip_icssg_cpsw",
++        "location": "../../source/networking/enet/core/examples/lwip/enet_lwip_icssg_cpsw/am243x-evm/r5fss0-0_freertos/ti-arm-clang/example.projectspec",
++        "devtools": [
++            "TMDS243EVM"
++        ],
++        "kernel": [
++            "freertos"
++        ],
++        "compiler": [
++            "ticlang"
++        ],
++        "subCategories": [
++            "..",
++            "source",
++            "networking",
++            "enet",
++            "core",
++            "examples",
++            "lwip",
++            "enet_lwip_icssg_cpsw",
++            "r5fss0-0_freertos"
++        ],
++        "mainCategories": [
++            [
++                "Examples",
++                "Development Tools"
++            ]
++        ]
++    },
+     {
+         "resourceType": "project.ccs",
+         "resourceClass": [
+diff --git a/.project/common.js b/.project/common.js
+index 7081d6031..6f1b7a33c 100755
+--- a/.project/common.js
++++ b/.project/common.js
+@@ -132,6 +132,7 @@ function getLibsBuitwihOS() {
+         "lwipif-cpsw-nortos",
+         "lwipif-icssg-freertos",
+         "lwipif-icssg-nortos",
++        "lwipif-cpsw-icssg-freertos",
+         "lwipif-ic-freertos",
+         "freeRTOS_fat-freertos",
+         "freeRTOS_fat-freertos-mpu",
+diff --git a/.project/device/project_am243x.js b/.project/device/project_am243x.js
+index c9baa8087..2d89fc9ff 100644
+--- a/.project/device/project_am243x.js
++++ b/.project/device/project_am243x.js
+@@ -29,6 +29,7 @@ const component_file_list = [
+     "source/networking/enet/.project/project_cpsw_lwipif_nortos.js",
+     "source/networking/enet/.project/project_icssg_lwipif_freertos.js",
+     "source/networking/enet/.project/project_icssg_lwipif_nortos.js",
++    "source/networking/enet/.project/project_cpsw_icssg_lwipif_freertos.js",
+     "source/networking/enet/.project/project_icssg.js",
+     "source/networking/enet/.project/project_cpsw_icssg.js",
+     "source/networking/icss_emac_lld/icss_emac/.project/project.js",
+@@ -233,6 +234,7 @@ const example_file_list = [
+     "source/networking/enet/core/examples/enet_layer2_icssg/icssg_layer2_dualmac/.project/project.js",
+     "source/networking/enet/core/examples/enet_layer2_icssg/icssg_layer2_switch/.project/project.js",
+     "source/networking/enet/core/examples/enet_layer2_icssg_cpsw/.project/project.js",
++    "source/networking/enet/core/examples/lwip/enet_lwip_icssg_cpsw/.project/project.js",
+     "source/networking/enet/core/examples/enet_vlan_icssg/.project/project.js",
+     "source/networking/enet/core/examples/lwip/enet_icssg_tcpserver/.project/project.js",
+     "source/networking/enet/core/examples/lwip/enet_lwip_icssg/.project/project.js",
+diff --git a/makefile.am243x b/makefile.am243x
+index 1ad6e5975..0a50dd2aa 100644
+--- a/makefile.am243x
++++ b/makefile.am243x
+@@ -59,6 +59,7 @@ help:
+ 	@echo  $(MAKE) -s -f makefile.am243x lwipif-cpsw-nortos_r5f.ti-arm-clang
+ 	@echo  $(MAKE) -s -f makefile.am243x lwipif-icssg-freertos_r5f.ti-arm-clang
+ 	@echo  $(MAKE) -s -f makefile.am243x lwipif-icssg-nortos_r5f.ti-arm-clang
++	@echo  $(MAKE) -s -f makefile.am243x lwipif-cpsw-icssg-freertos_r5f.ti-arm-clang
+ 	@echo  $(MAKE) -s -f makefile.am243x enet-cpsw-icssg_r5f.ti-arm-clang.nortos enet-cpsw-icssg_r5f.ti-arm-clang.freertos
+ 	@echo  $(MAKE) -s -f makefile.am243x enet-icssg_r5f.ti-arm-clang.nortos enet-icssg_r5f.ti-arm-clang.freertos
+ 	@echo  $(MAKE) -s -f makefile.am243x icss_emac_r5f.ti-arm-clang.nortos icss_emac_r5f.ti-arm-clang.freertos
+@@ -108,6 +109,7 @@ help:
+ 	@echo  $(MAKE) -s -f makefile.am243x lwipif-cpsw-nortos_r5f.ti-arm-clang_clean
+ 	@echo  $(MAKE) -s -f makefile.am243x lwipif-icssg-freertos_r5f.ti-arm-clang_clean
+ 	@echo  $(MAKE) -s -f makefile.am243x lwipif-icssg-nortos_r5f.ti-arm-clang_clean
++	@echo  $(MAKE) -s -f makefile.am243x lwipif-cpsw-icssg-freertos_r5f.ti-arm-clang_clean
+ 	@echo  $(MAKE) -s -f makefile.am243x enet-icssg_r5f.ti-arm-clang.nortos_clean enet-icssg_r5f.ti-arm-clang.freertos_clean
+ 	@echo  $(MAKE) -s -f makefile.am243x icss_emac_r5f.ti-arm-clang.nortos_clean icss_emac_r5f.ti-arm-clang.freertos_clean
+ 	@echo  $(MAKE) -s -f makefile.am243x icss_emac_lwip_if_r5f.ti-arm-clang.nortos_clean icss_emac_lwip_if_r5f.ti-arm-clang.freertos_clean
+@@ -529,6 +531,7 @@ help:
+ 	@echo  $(MAKE) -s -C source/networking/enet/core/examples/enet_layer2_icssg/icssg_layer2_switch/am243x-evm/r5fss0-0_freertos/ti-arm-clang [all clean syscfg-gui syscfg]
+ 	@echo  $(MAKE) -s -C source/networking/enet/core/examples/enet_layer2_icssg/icssg_layer2_switch/am243x-lp/r5fss0-0_freertos/ti-arm-clang [all clean syscfg-gui syscfg]
+ 	@echo  $(MAKE) -s -C source/networking/enet/core/examples/enet_layer2_icssg_cpsw/am243x-evm/r5fss0-0_freertos/ti-arm-clang [all clean syscfg-gui syscfg]
++	@echo  $(MAKE) -s -C source/networking/enet/core/examples/lwip/enet_lwip_icssg_cpsw/am243x-evm/r5fss0-0_freertos/ti-arm-clang [all clean syscfg-gui syscfg]
+ 	@echo  $(MAKE) -s -C source/networking/enet/core/examples/enet_vlan_icssg/am243x-evm/r5fss0-0_freertos/ti-arm-clang [all clean syscfg-gui syscfg]
+ 	@echo  $(MAKE) -s -C source/networking/enet/core/examples/enet_vlan_icssg/am243x-lp/r5fss0-0_freertos/ti-arm-clang [all clean syscfg-gui syscfg]
+ 	@echo  $(MAKE) -s -C source/networking/enet/core/examples/lwip/enet_icssg_tcpserver/am243x-evm/r5fss0-0_freertos/ti-arm-clang [all clean syscfg-gui syscfg]
+@@ -647,6 +650,7 @@ BUILD_COMBO_lwipif-cpsw-freertos = lwipif-cpsw-freertos_r5f.ti-arm-clang
+ BUILD_COMBO_lwipif-cpsw-nortos = lwipif-cpsw-nortos_r5f.ti-arm-clang
+ BUILD_COMBO_lwipif-icssg-freertos = lwipif-icssg-freertos_r5f.ti-arm-clang
+ BUILD_COMBO_lwipif-icssg-nortos = lwipif-icssg-nortos_r5f.ti-arm-clang
++BUILD_COMBO_lwipif-cpsw-icssg-freertos = lwipif-cpsw-icssg-freertos_r5f.ti-arm-clang
+ BUILD_COMBO_enet-cpsw-icssg = enet-cpsw-icssg_r5f.ti-arm-clang.nortos enet-cpsw-icssg_r5f.ti-arm-clang.freertos
+ BUILD_COMBO_enet-icssg = enet-icssg_r5f.ti-arm-clang.nortos enet-icssg_r5f.ti-arm-clang.freertos
+ BUILD_COMBO_icss_emac = icss_emac_r5f.ti-arm-clang.nortos icss_emac_r5f.ti-arm-clang.freertos
+@@ -667,7 +671,7 @@ BUILD_COMBO_tsn_unibase-freertos = tsn_unibase-freertos_r5f.ti-arm-clang
+ 
+ 
+ # Combine all Components
+-BUILD_COMBO_ALL = $(BUILD_COMBO_board) $(BUILD_COMBO_drivers) $(BUILD_COMBO_freeRTOS_fat-freertos) $(BUILD_COMBO_freeRTOS_fat-nortos) $(BUILD_COMBO_littlefs) $(BUILD_COMBO_middleware) $(BUILD_COMBO_sdl) $(BUILD_COMBO_nortos) $(BUILD_COMBO_freertos) $(BUILD_COMBO_mathlib) $(BUILD_COMBO_pru_ipc) $(BUILD_COMBO_security) $(BUILD_COMBO_usbd_cdn_nortos) $(BUILD_COMBO_usbd_cdn_freertos) $(BUILD_COMBO_usbd_tusb_cdc_nortos) $(BUILD_COMBO_usbd_tusb_cdc_freertos) $(BUILD_COMBO_usbd_tusb_dfu_nortos) $(BUILD_COMBO_usbd_tusb_dfu_freertos) $(BUILD_COMBO_usbd_tusb_ncm_nortos) $(BUILD_COMBO_usbd_tusb_ncm_freertos) $(BUILD_COMBO_usbd_tusb_rndis_nortos) $(BUILD_COMBO_usbd_tusb_rndis_freertos) $(BUILD_COMBO_enet-cpsw) $(BUILD_COMBO_lwipif-cpsw-freertos) $(BUILD_COMBO_lwipif-cpsw-nortos) $(BUILD_COMBO_lwipif-icssg-freertos) $(BUILD_COMBO_lwipif-icssg-nortos) $(BUILD_COMBO_enet-icssg) $(BUILD_COMBO_enet-cpsw-icssg) $(BUILD_COMBO_icss_emac) $(BUILD_COMBO_icss_emac_lwip_if) $(BUILD_COMBO_icss_timesync) $(BUILD_COMBO_lwip-freertos) $(BUILD_COMBO_lwip-nortos) $(BUILD_COMBO_lwip-contrib-freertos) $(BUILD_COMBO_lwip-contrib-nortos) $(BUILD_COMBO_lwipif-ic-freertos) $(BUILD_COMBO_mbedtls) $(BUILD_COMBO_tsn_gptp-freertos) $(BUILD_COMBO_tsn_icssg_gptp-freertos) $(BUILD_COMBO_tsn_icssg_combase-freertos) $(BUILD_COMBO_tsn_combase-freertos) $(BUILD_COMBO_tsn_uniconf-freertos) $(BUILD_COMBO_tsn_unibase-freertos)
++BUILD_COMBO_ALL = $(BUILD_COMBO_board) $(BUILD_COMBO_drivers) $(BUILD_COMBO_freeRTOS_fat-freertos) $(BUILD_COMBO_freeRTOS_fat-nortos) $(BUILD_COMBO_littlefs) $(BUILD_COMBO_middleware) $(BUILD_COMBO_sdl) $(BUILD_COMBO_nortos) $(BUILD_COMBO_freertos) $(BUILD_COMBO_mathlib) $(BUILD_COMBO_pru_ipc) $(BUILD_COMBO_security) $(BUILD_COMBO_usbd_cdn_nortos) $(BUILD_COMBO_usbd_cdn_freertos) $(BUILD_COMBO_usbd_tusb_cdc_nortos) $(BUILD_COMBO_usbd_tusb_cdc_freertos) $(BUILD_COMBO_usbd_tusb_dfu_nortos) $(BUILD_COMBO_usbd_tusb_dfu_freertos) $(BUILD_COMBO_usbd_tusb_ncm_nortos) $(BUILD_COMBO_usbd_tusb_ncm_freertos) $(BUILD_COMBO_usbd_tusb_rndis_nortos) $(BUILD_COMBO_usbd_tusb_rndis_freertos) $(BUILD_COMBO_enet-cpsw) $(BUILD_COMBO_lwipif-cpsw-freertos) $(BUILD_COMBO_lwipif-cpsw-nortos) $(BUILD_COMBO_lwipif-icssg-freertos) $(BUILD_COMBO_lwipif-icssg-nortos) $(BUILD_COMBO_lwipif-cpsw-icssg-freertos) $(BUILD_COMBO_enet-icssg) $(BUILD_COMBO_enet-cpsw-icssg) $(BUILD_COMBO_icss_emac) $(BUILD_COMBO_icss_emac_lwip_if) $(BUILD_COMBO_icss_timesync) $(BUILD_COMBO_lwip-freertos) $(BUILD_COMBO_lwip-nortos) $(BUILD_COMBO_lwip-contrib-freertos) $(BUILD_COMBO_lwip-contrib-nortos) $(BUILD_COMBO_lwipif-ic-freertos) $(BUILD_COMBO_mbedtls) $(BUILD_COMBO_tsn_gptp-freertos) $(BUILD_COMBO_tsn_icssg_gptp-freertos) $(BUILD_COMBO_tsn_icssg_combase-freertos) $(BUILD_COMBO_tsn_combase-freertos) $(BUILD_COMBO_tsn_uniconf-freertos) $(BUILD_COMBO_tsn_unibase-freertos)
+ 
+ 
+ # Combine all Pre-built Components
+@@ -768,6 +772,9 @@ $(BUILD_COMBO_lwipif-icssg-freertos):
+ $(BUILD_COMBO_lwipif-icssg-nortos):
+ 	$(MAKE) -C source/networking/enet -f makefile.lwipif-icssg-nortos.am243x.$(subst lwipif-icssg-nortos_,,$@) all
+ 
++$(BUILD_COMBO_lwipif-cpsw-icssg-freertos):
++	$(MAKE) -C source/networking/enet -f makefile.lwipif-cpsw-icssg-freertos.am243x.$(subst lwipif-cpsw-icssg-freertos_,,$@) all
++
+ $(BUILD_COMBO_enet-icssg):
+ 	$(MAKE) -C source/networking/enet -f makefile.icssg.am243x.$(subst enet-icssg_,,$@) all
+ 
+@@ -850,6 +857,7 @@ BUILD_COMBO_CLEAN_lwipif-cpsw-freertos = lwipif-cpsw-freertos_r5f.ti-arm-clang_c
+ BUILD_COMBO_CLEAN_lwipif-cpsw-nortos = lwipif-cpsw-nortos_r5f.ti-arm-clang_clean
+ BUILD_COMBO_CLEAN_lwipif-icssg-freertos = lwipif-icssg-freertos_r5f.ti-arm-clang_clean
+ BUILD_COMBO_CLEAN_lwipif-icssg-nortos = lwipif-icssg-nortos_r5f.ti-arm-clang_clean
++BUILD_COMBO_CLEAN_lwipif-cpsw-icssg-freertos = lwipif-cpsw-icssg-freertos_r5f.ti-arm-clang_clean
+ BUILD_COMBO_CLEAN_enet-cpsw-icssg = enet-cpsw-icssg_r5f.ti-arm-clang.nortos_clean enet-cpsw-icssg_r5f.ti-arm-clang.freertos_clean
+ BUILD_COMBO_CLEAN_enet-icssg = enet-icssg_r5f.ti-arm-clang.nortos_clean enet-icssg_r5f.ti-arm-clang.freertos_clean
+ BUILD_COMBO_CLEAN_icss_emac = icss_emac_r5f.ti-arm-clang.nortos_clean icss_emac_r5f.ti-arm-clang.freertos_clean
+@@ -870,7 +878,7 @@ BUILD_COMBO_CLEAN_tsn_unibase-freertos = tsn_unibase-freertos_r5f.ti-arm-clang_c
+ 
+ 
+ # Combine all Components Clean
+-BUILD_COMBO_CLEAN_ALL = $(BUILD_COMBO_CLEAN_board) $(BUILD_COMBO_CLEAN_drivers) $(BUILD_COMBO_CLEAN_freeRTOS_fat-freertos) $(BUILD_COMBO_CLEAN_freeRTOS_fat-nortos) $(BUILD_COMBO_CLEAN_littlefs) $(BUILD_COMBO_CLEAN_middleware) $(BUILD_COMBO_CLEAN_sdl) $(BUILD_COMBO_CLEAN_nortos) $(BUILD_COMBO_CLEAN_freertos) $(BUILD_COMBO_CLEAN_mathlib) $(BUILD_COMBO_CLEAN_pru_ipc) $(BUILD_COMBO_CLEAN_security) $(BUILD_COMBO_CLEAN_usbd_cdn_nortos) $(BUILD_COMBO_CLEAN_usbd_cdn_freertos) $(BUILD_COMBO_CLEAN_usbd_tusb_cdc_nortos) $(BUILD_COMBO_CLEAN_usbd_tusb_cdc_freertos) $(BUILD_COMBO_CLEAN_usbd_tusb_dfu_nortos) $(BUILD_COMBO_CLEAN_usbd_tusb_dfu_freertos) $(BUILD_COMBO_CLEAN_usbd_tusb_ncm_nortos) $(BUILD_COMBO_CLEAN_usbd_tusb_ncm_freertos) $(BUILD_COMBO_CLEAN_usbd_tusb_rndis_nortos) $(BUILD_COMBO_CLEAN_usbd_tusb_rndis_freertos) $(BUILD_COMBO_CLEAN_enet-cpsw) $(BUILD_COMBO_CLEAN_lwipif-cpsw-freertos) $(BUILD_COMBO_CLEAN_lwipif-cpsw-nortos) $(BUILD_COMBO_CLEAN_lwipif-icssg-freertos) $(BUILD_COMBO_CLEAN_lwipif-icssg-nortos) $(BUILD_COMBO_CLEAN_enet-icssg) $(BUILD_COMBO_CLEAN_enet-cpsw-icssg) $(BUILD_COMBO_CLEAN_icss_emac) $(BUILD_COMBO_CLEAN_icss_emac_lwip_if) $(BUILD_COMBO_CLEAN_icss_timesync) $(BUILD_COMBO_CLEAN_lwip-freertos) $(BUILD_COMBO_CLEAN_lwip-nortos) $(BUILD_COMBO_CLEAN_lwip-contrib-freertos) $(BUILD_COMBO_CLEAN_lwip-contrib-nortos) $(BUILD_COMBO_CLEAN_lwipif-ic-freertos) $(BUILD_COMBO_CLEAN_mbedtls) $(BUILD_COMBO_CLEAN_tsn_gptp-freertos) $(BUILD_COMBO_CLEAN_tsn_icssg_gptp-freertos) $(BUILD_COMBO_CLEAN_tsn_icssg_combase-freertos) $(BUILD_COMBO_CLEAN_tsn_combase-freertos) $(BUILD_COMBO_CLEAN_tsn_uniconf-freertos) $(BUILD_COMBO_CLEAN_tsn_unibase-freertos)
++BUILD_COMBO_CLEAN_ALL = $(BUILD_COMBO_CLEAN_board) $(BUILD_COMBO_CLEAN_drivers) $(BUILD_COMBO_CLEAN_freeRTOS_fat-freertos) $(BUILD_COMBO_CLEAN_freeRTOS_fat-nortos) $(BUILD_COMBO_CLEAN_littlefs) $(BUILD_COMBO_CLEAN_middleware) $(BUILD_COMBO_CLEAN_sdl) $(BUILD_COMBO_CLEAN_nortos) $(BUILD_COMBO_CLEAN_freertos) $(BUILD_COMBO_CLEAN_mathlib) $(BUILD_COMBO_CLEAN_pru_ipc) $(BUILD_COMBO_CLEAN_security) $(BUILD_COMBO_CLEAN_usbd_cdn_nortos) $(BUILD_COMBO_CLEAN_usbd_cdn_freertos) $(BUILD_COMBO_CLEAN_usbd_tusb_cdc_nortos) $(BUILD_COMBO_CLEAN_usbd_tusb_cdc_freertos) $(BUILD_COMBO_CLEAN_usbd_tusb_dfu_nortos) $(BUILD_COMBO_CLEAN_usbd_tusb_dfu_freertos) $(BUILD_COMBO_CLEAN_usbd_tusb_ncm_nortos) $(BUILD_COMBO_CLEAN_usbd_tusb_ncm_freertos) $(BUILD_COMBO_CLEAN_usbd_tusb_rndis_nortos) $(BUILD_COMBO_CLEAN_usbd_tusb_rndis_freertos) $(BUILD_COMBO_CLEAN_enet-cpsw) $(BUILD_COMBO_CLEAN_lwipif-cpsw-freertos) $(BUILD_COMBO_CLEAN_lwipif-cpsw-nortos) $(BUILD_COMBO_CLEAN_lwipif-icssg-freertos) $(BUILD_COMBO_CLEAN_lwipif-icssg-nortos) $(BUILD_COMBO_CLEAN_lwipif-cpsw-icssg-freertos) $(BUILD_COMBO_CLEAN_enet-icssg) $(BUILD_COMBO_CLEAN_enet-cpsw-icssg) $(BUILD_COMBO_CLEAN_icss_emac) $(BUILD_COMBO_CLEAN_icss_emac_lwip_if) $(BUILD_COMBO_CLEAN_icss_timesync) $(BUILD_COMBO_CLEAN_lwip-freertos) $(BUILD_COMBO_CLEAN_lwip-nortos) $(BUILD_COMBO_CLEAN_lwip-contrib-freertos) $(BUILD_COMBO_CLEAN_lwip-contrib-nortos) $(BUILD_COMBO_CLEAN_lwipif-ic-freertos) $(BUILD_COMBO_CLEAN_mbedtls) $(BUILD_COMBO_CLEAN_tsn_gptp-freertos) $(BUILD_COMBO_CLEAN_tsn_icssg_gptp-freertos) $(BUILD_COMBO_CLEAN_tsn_icssg_combase-freertos) $(BUILD_COMBO_CLEAN_tsn_combase-freertos) $(BUILD_COMBO_CLEAN_tsn_uniconf-freertos) $(BUILD_COMBO_CLEAN_tsn_unibase-freertos)
+ 
+ 
+ # Combine all Pre-built Components Clean
+@@ -965,6 +973,9 @@ $(BUILD_COMBO_CLEAN_lwipif-icssg-freertos):
+ $(BUILD_COMBO_CLEAN_lwipif-icssg-nortos):
+ 	$(MAKE) -C source/networking/enet -f makefile.lwipif-icssg-nortos.am243x.$(subst lwipif-icssg-nortos_,,$(subst _clean,,$@)) clean
+ 
++$(BUILD_COMBO_CLEAN_lwipif-cpsw-icssg-freertos):
++	$(MAKE) -C source/networking/enet -f makefile.lwipif-cpsw-icssg-freertos.am243x.$(subst lwipif-cpsw-icssg-freertos_,,$(subst _clean,,$@)) clean
++
+ $(BUILD_COMBO_CLEAN_enet-icssg):
+ 	$(MAKE) -C source/networking/enet -f makefile.icssg.am243x.$(subst enet-icssg_,,$(subst _clean,,$@)) clean
+ 
+@@ -1047,6 +1058,7 @@ BUILD_COMBO_SCRUB_lwipif-cpsw-freertos = lwipif-cpsw-freertos_r5f.ti-arm-clang_s
+ BUILD_COMBO_SCRUB_lwipif-cpsw-nortos = lwipif-cpsw-nortos_r5f.ti-arm-clang_scrub
+ BUILD_COMBO_SCRUB_lwipif-icssg-freertos = lwipif-icssg-freertos_r5f.ti-arm-clang_scrub
+ BUILD_COMBO_SCRUB_lwipif-icssg-nortos = lwipif-icssg-nortos_r5f.ti-arm-clang_scrub
++BUILD_COMBO_SCRUB_lwipif-cpsw-icssg-freertos = lwipif-cpsw-icssg-freertos_r5f.ti-arm-clang_scrub
+ BUILD_COMBO_SCRUB_enet-cpsw-icssg = enet-cpsw-icssg_r5f.ti-arm-clang.nortos_scrub enet-cpsw-icssg_r5f.ti-arm-clang.freertos_scrub
+ BUILD_COMBO_SCRUB_enet-icssg = enet-icssg_r5f.ti-arm-clang.nortos_scrub enet-icssg_r5f.ti-arm-clang.freertos_scrub
+ BUILD_COMBO_SCRUB_icss_emac = icss_emac_r5f.ti-arm-clang.nortos_scrub icss_emac_r5f.ti-arm-clang.freertos_scrub
+@@ -1067,7 +1079,7 @@ BUILD_COMBO_SCRUB_tsn_unibase-freertos = tsn_unibase-freertos_r5f.ti-arm-clang_s
+ 
+ 
+ # Combine all Components Scrub Targets
+-BUILD_COMBO_SCRUB_ALL = $(BUILD_COMBO_SCRUB_board) $(BUILD_COMBO_SCRUB_drivers) $(BUILD_COMBO_SCRUB_freeRTOS_fat-freertos) $(BUILD_COMBO_SCRUB_freeRTOS_fat-nortos) $(BUILD_COMBO_SCRUB_littlefs) $(BUILD_COMBO_SCRUB_middleware) $(BUILD_COMBO_SCRUB_sdl) $(BUILD_COMBO_SCRUB_nortos) $(BUILD_COMBO_SCRUB_freertos) $(BUILD_COMBO_SCRUB_mathlib) $(BUILD_COMBO_SCRUB_pru_ipc) $(BUILD_COMBO_SCRUB_security) $(BUILD_COMBO_SCRUB_usbd_cdn_nortos) $(BUILD_COMBO_SCRUB_usbd_cdn_freertos) $(BUILD_COMBO_SCRUB_usbd_tusb_cdc_nortos) $(BUILD_COMBO_SCRUB_usbd_tusb_cdc_freertos) $(BUILD_COMBO_SCRUB_usbd_tusb_dfu_nortos) $(BUILD_COMBO_SCRUB_usbd_tusb_dfu_freertos) $(BUILD_COMBO_SCRUB_usbd_tusb_ncm_nortos) $(BUILD_COMBO_SCRUB_usbd_tusb_ncm_freertos) $(BUILD_COMBO_SCRUB_usbd_tusb_rndis_nortos) $(BUILD_COMBO_SCRUB_usbd_tusb_rndis_freertos) $(BUILD_COMBO_SCRUB_enet-cpsw) $(BUILD_COMBO_SCRUB_lwipif-cpsw-freertos) $(BUILD_COMBO_SCRUB_lwipif-cpsw-nortos) $(BUILD_COMBO_SCRUB_lwipif-icssg-freertos) $(BUILD_COMBO_SCRUB_lwipif-icssg-nortos) $(BUILD_COMBO_SCRUB_enet-icssg) $(BUILD_COMBO_SCRUB_enet-cpsw-icssg) $(BUILD_COMBO_SCRUB_icss_emac) $(BUILD_COMBO_SCRUB_icss_emac_lwip_if) $(BUILD_COMBO_SCRUB_icss_timesync) $(BUILD_COMBO_SCRUB_lwip-freertos) $(BUILD_COMBO_SCRUB_lwip-nortos) $(BUILD_COMBO_SCRUB_lwip-contrib-freertos) $(BUILD_COMBO_SCRUB_lwip-contrib-nortos) $(BUILD_COMBO_SCRUB_lwipif-ic-freertos) $(BUILD_COMBO_SCRUB_mbedtls) $(BUILD_COMBO_SCRUB_tsn_gptp-freertos) $(BUILD_COMBO_SCRUB_tsn_icssg_gptp-freertos) $(BUILD_COMBO_SCRUB_tsn_icssg_combase-freertos) $(BUILD_COMBO_SCRUB_tsn_combase-freertos) $(BUILD_COMBO_SCRUB_tsn_uniconf-freertos) $(BUILD_COMBO_SCRUB_tsn_unibase-freertos)
++BUILD_COMBO_SCRUB_ALL = $(BUILD_COMBO_SCRUB_board) $(BUILD_COMBO_SCRUB_drivers) $(BUILD_COMBO_SCRUB_freeRTOS_fat-freertos) $(BUILD_COMBO_SCRUB_freeRTOS_fat-nortos) $(BUILD_COMBO_SCRUB_littlefs) $(BUILD_COMBO_SCRUB_middleware) $(BUILD_COMBO_SCRUB_sdl) $(BUILD_COMBO_SCRUB_nortos) $(BUILD_COMBO_SCRUB_freertos) $(BUILD_COMBO_SCRUB_mathlib) $(BUILD_COMBO_SCRUB_pru_ipc) $(BUILD_COMBO_SCRUB_security) $(BUILD_COMBO_SCRUB_usbd_cdn_nortos) $(BUILD_COMBO_SCRUB_usbd_cdn_freertos) $(BUILD_COMBO_SCRUB_usbd_tusb_cdc_nortos) $(BUILD_COMBO_SCRUB_usbd_tusb_cdc_freertos) $(BUILD_COMBO_SCRUB_usbd_tusb_dfu_nortos) $(BUILD_COMBO_SCRUB_usbd_tusb_dfu_freertos) $(BUILD_COMBO_SCRUB_usbd_tusb_ncm_nortos) $(BUILD_COMBO_SCRUB_usbd_tusb_ncm_freertos) $(BUILD_COMBO_SCRUB_usbd_tusb_rndis_nortos) $(BUILD_COMBO_SCRUB_usbd_tusb_rndis_freertos) $(BUILD_COMBO_SCRUB_enet-cpsw) $(BUILD_COMBO_SCRUB_lwipif-cpsw-freertos) $(BUILD_COMBO_SCRUB_lwipif-cpsw-nortos) $(BUILD_COMBO_SCRUB_lwipif-icssg-freertos) $(BUILD_COMBO_SCRUB_lwipif-icssg-nortos) $(BUILD_COMBO_SCRUB_lwipif-cpsw-icssg-freertos) $(BUILD_COMBO_SCRUB_enet-icssg) $(BUILD_COMBO_SCRUB_enet-cpsw-icssg) $(BUILD_COMBO_SCRUB_icss_emac) $(BUILD_COMBO_SCRUB_icss_emac_lwip_if) $(BUILD_COMBO_SCRUB_icss_timesync) $(BUILD_COMBO_SCRUB_lwip-freertos) $(BUILD_COMBO_SCRUB_lwip-nortos) $(BUILD_COMBO_SCRUB_lwip-contrib-freertos) $(BUILD_COMBO_SCRUB_lwip-contrib-nortos) $(BUILD_COMBO_SCRUB_lwipif-ic-freertos) $(BUILD_COMBO_SCRUB_mbedtls) $(BUILD_COMBO_SCRUB_tsn_gptp-freertos) $(BUILD_COMBO_SCRUB_tsn_icssg_gptp-freertos) $(BUILD_COMBO_SCRUB_tsn_icssg_combase-freertos) $(BUILD_COMBO_SCRUB_tsn_combase-freertos) $(BUILD_COMBO_SCRUB_tsn_uniconf-freertos) $(BUILD_COMBO_SCRUB_tsn_unibase-freertos)
+ 
+ # Combine all Pre-built Components Scrub Targets
+ BUILD_COMBO_PREBUILT_SCRUB_ALL = $(BUILD_COMBO_SCRUB_cmsis)
+@@ -1161,6 +1173,9 @@ $(BUILD_COMBO_SCRUB_lwipif-icssg-freertos):
+ $(BUILD_COMBO_SCRUB_lwipif-icssg-nortos):
+ 	$(MAKE) -C source/networking/enet -f makefile.lwipif-icssg-nortos.am243x.$(subst lwipif-icssg-nortos_,,$(subst _scrub,,$@)) scrub
+ 
++$(BUILD_COMBO_SCRUB_lwipif-cpsw-icssg-freertos):
++	$(MAKE) -C source/networking/enet -f makefile.lwipif-cpsw-icssg-freertos.am243x.$(subst lwipif-cpsw-icssg-freertos_,,$(subst _scrub,,$@)) scrub
++
+ $(BUILD_COMBO_SCRUB_enet-icssg):
+ 	$(MAKE) -C source/networking/enet -f makefile.icssg.am243x.$(subst enet-icssg_,,$(subst _scrub,,$@)) scrub
+ 
+@@ -1597,6 +1612,7 @@ BUILD_COMBO_EXAMPLE_ALL += icssg_layer2_dualmac_am243x-lp_r5fss0-0_freertos_ti-a
+ BUILD_COMBO_EXAMPLE_ALL += enet_layer2_icssg_am243x-evm_r5fss0-0_freertos_ti-arm-clang
+ BUILD_COMBO_EXAMPLE_ALL += enet_layer2_icssg_am243x-lp_r5fss0-0_freertos_ti-arm-clang
+ BUILD_COMBO_EXAMPLE_ALL += enet_layer2_icssg_cpsw_am243x-evm_r5fss0-0_freertos_ti-arm-clang
++BUILD_COMBO_EXAMPLE_ALL += enet_lwip_icssg_cpsw_am243x-evm_r5fss0-0_freertos_ti-arm-clang
+ BUILD_COMBO_EXAMPLE_ALL += enet_vlan_icssg_am243x-evm_r5fss0-0_freertos_ti-arm-clang
+ BUILD_COMBO_EXAMPLE_ALL += enet_vlan_icssg_am243x-lp_r5fss0-0_freertos_ti-arm-clang
+ BUILD_COMBO_EXAMPLE_ALL += enet_icssg_tcpserver_am243x-evm_r5fss0-0_freertos_ti-arm-clang
+@@ -2903,6 +2919,9 @@ examples-private: $(BUILD_COMBO_EXAMPLE_PRIVATE_ALL)
+  enet_layer2_icssg_cpsw_am243x-evm_r5fss0-0_freertos_ti-arm-clang:
+ 	$(MAKE) -C source/networking/enet/core/examples/enet_layer2_icssg_cpsw/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile all
+ 
++ enet_lwip_icssg_cpsw_am243x-evm_r5fss0-0_freertos_ti-arm-clang:
++	$(MAKE) -C source/networking/enet/core/examples/lwip/enet_lwip_icssg_cpsw/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile all
++
+  enet_vlan_icssg_am243x-evm_r5fss0-0_freertos_ti-arm-clang:
+ 	$(MAKE) -C source/networking/enet/core/examples/enet_vlan_icssg/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile all
+ 
+@@ -3540,6 +3559,7 @@ BUILD_COMBO_EXAMPLE_CLEAN_ALL += icssg_layer2_dualmac_am243x-lp_r5fss0-0_freerto
+ BUILD_COMBO_EXAMPLE_CLEAN_ALL += enet_layer2_icssg_am243x-evm_r5fss0-0_freertos_ti-arm-clang_clean
+ BUILD_COMBO_EXAMPLE_CLEAN_ALL += enet_layer2_icssg_am243x-lp_r5fss0-0_freertos_ti-arm-clang_clean
+ BUILD_COMBO_EXAMPLE_CLEAN_ALL += enet_layer2_icssg_cpsw_am243x-evm_r5fss0-0_freertos_ti-arm-clang_clean
++BUILD_COMBO_EXAMPLE_CLEAN_ALL += enet_lwip_icssg_cpsw_am243x-evm_r5fss0-0_freertos_ti-arm-clang_clean
+ BUILD_COMBO_EXAMPLE_CLEAN_ALL += enet_vlan_icssg_am243x-evm_r5fss0-0_freertos_ti-arm-clang_clean
+ BUILD_COMBO_EXAMPLE_CLEAN_ALL += enet_vlan_icssg_am243x-lp_r5fss0-0_freertos_ti-arm-clang_clean
+ BUILD_COMBO_EXAMPLE_CLEAN_ALL += enet_icssg_tcpserver_am243x-evm_r5fss0-0_freertos_ti-arm-clang_clean
+@@ -4841,6 +4861,9 @@ examples-private-clean: $(BUILD_COMBO_EXAMPLE_PRIVATE_CLEAN_ALL)
+  enet_layer2_icssg_cpsw_am243x-evm_r5fss0-0_freertos_ti-arm-clang_clean:
+ 	$(MAKE) -C source/networking/enet/core/examples/enet_layer2_icssg_cpsw/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile clean
+ 
++ enet_lwip_icssg_cpsw_am243x-evm_r5fss0-0_freertos_ti-arm-clang_clean:
++	$(MAKE) -C source/networking/enet/core/examples/lwip/enet_lwip_icssg_cpsw/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile clean
++
+  enet_vlan_icssg_am243x-evm_r5fss0-0_freertos_ti-arm-clang_clean:
+ 	$(MAKE) -C source/networking/enet/core/examples/enet_vlan_icssg/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile clean
+ 
+@@ -5478,6 +5501,7 @@ BUILD_COMBO_EXAMPLE_SCRUB_ALL += icssg_layer2_dualmac_am243x-lp_r5fss0-0_freerto
+ BUILD_COMBO_EXAMPLE_SCRUB_ALL += enet_layer2_icssg_am243x-evm_r5fss0-0_freertos_ti-arm-clang_scrub
+ BUILD_COMBO_EXAMPLE_SCRUB_ALL += enet_layer2_icssg_am243x-lp_r5fss0-0_freertos_ti-arm-clang_scrub
+ BUILD_COMBO_EXAMPLE_SCRUB_ALL += enet_layer2_icssg_cpsw_am243x-evm_r5fss0-0_freertos_ti-arm-clang_scrub
++BUILD_COMBO_EXAMPLE_SCRUB_ALL += enet_lwip_icssg_cpsw_am243x-evm_r5fss0-0_freertos_ti-arm-clang_scrub
+ BUILD_COMBO_EXAMPLE_SCRUB_ALL += enet_vlan_icssg_am243x-evm_r5fss0-0_freertos_ti-arm-clang_scrub
+ BUILD_COMBO_EXAMPLE_SCRUB_ALL += enet_vlan_icssg_am243x-lp_r5fss0-0_freertos_ti-arm-clang_scrub
+ BUILD_COMBO_EXAMPLE_SCRUB_ALL += enet_icssg_tcpserver_am243x-evm_r5fss0-0_freertos_ti-arm-clang_scrub
+@@ -6779,6 +6803,9 @@ examples-scrub-private: $(BUILD_COMBO_EXAMPLE_PRIVATE_SCRUB_ALL)
+  enet_layer2_icssg_cpsw_am243x-evm_r5fss0-0_freertos_ti-arm-clang_scrub:
+ 	$(MAKE) -C source/networking/enet/core/examples/enet_layer2_icssg_cpsw/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile scrub
+ 
++ enet_lwip_icssg_cpsw_am243x-evm_r5fss0-0_freertos_ti-arm-clang_scrub:
++	$(MAKE) -C source/networking/enet/core/examples/lwip/enet_lwip_icssg_cpsw/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile scrub
++
+  enet_vlan_icssg_am243x-evm_r5fss0-0_freertos_ti-arm-clang_scrub:
+ 	$(MAKE) -C source/networking/enet/core/examples/enet_vlan_icssg/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile scrub
+ 
+diff --git a/makefile_projectspec.am243x b/makefile_projectspec.am243x
+index 72b49de75..37186bf25 100644
+--- a/makefile_projectspec.am243x
++++ b/makefile_projectspec.am243x
+@@ -406,6 +406,7 @@ BUILD_COMBO_EXAMPLE_PROJECTSPEC_BUILD_ALL += icssg_layer2_dualmac_am243x-lp_r5fs
+ BUILD_COMBO_EXAMPLE_PROJECTSPEC_BUILD_ALL += enet_layer2_icssg_am243x-evm_r5fss0-0_freertos_ti-arm-clang_build
+ BUILD_COMBO_EXAMPLE_PROJECTSPEC_BUILD_ALL += enet_layer2_icssg_am243x-lp_r5fss0-0_freertos_ti-arm-clang_build
+ BUILD_COMBO_EXAMPLE_PROJECTSPEC_BUILD_ALL += enet_layer2_icssg_cpsw_am243x-evm_r5fss0-0_freertos_ti-arm-clang_build
++BUILD_COMBO_EXAMPLE_PROJECTSPEC_BUILD_ALL += enet_lwip_icssg_cpsw_am243x-evm_r5fss0-0_freertos_ti-arm-clang_build
+ BUILD_COMBO_EXAMPLE_PROJECTSPEC_BUILD_ALL += enet_vlan_icssg_am243x-evm_r5fss0-0_freertos_ti-arm-clang_build
+ BUILD_COMBO_EXAMPLE_PROJECTSPEC_BUILD_ALL += enet_vlan_icssg_am243x-lp_r5fss0-0_freertos_ti-arm-clang_build
+ BUILD_COMBO_EXAMPLE_PROJECTSPEC_BUILD_ALL += enet_icssg_tcpserver_am243x-evm_r5fss0-0_freertos_ti-arm-clang_build
+@@ -1706,6 +1707,9 @@ all-private: $(BUILD_COMBO_EXAMPLE_PROJECTSPEC_BUILD_PRIVATE_ALL)
+  enet_layer2_icssg_cpsw_am243x-evm_r5fss0-0_freertos_ti-arm-clang_build:
+ 	$(MAKE) -C source/networking/enet/core/examples/enet_layer2_icssg_cpsw/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile_projectspec all
+ 
++ enet_lwip_icssg_cpsw_am243x-evm_r5fss0-0_freertos_ti-arm-clang_build:
++	$(MAKE) -C source/networking/enet/core/examples/lwip/enet_lwip_icssg_cpsw/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile_projectspec all
++
+  enet_vlan_icssg_am243x-evm_r5fss0-0_freertos_ti-arm-clang_build:
+ 	$(MAKE) -C source/networking/enet/core/examples/enet_vlan_icssg/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile_projectspec all
+ 
+@@ -2364,6 +2368,7 @@ BUILD_COMBO_EXAMPLE_PROJECTSPEC_CLEAN_ALL += icssg_layer2_dualmac_am243x-lp_r5fs
+ BUILD_COMBO_EXAMPLE_PROJECTSPEC_CLEAN_ALL += enet_layer2_icssg_am243x-evm_r5fss0-0_freertos_ti-arm-clang_clean
+ BUILD_COMBO_EXAMPLE_PROJECTSPEC_CLEAN_ALL += enet_layer2_icssg_am243x-lp_r5fss0-0_freertos_ti-arm-clang_clean
+ BUILD_COMBO_EXAMPLE_PROJECTSPEC_CLEAN_ALL += enet_layer2_icssg_cpsw_am243x-evm_r5fss0-0_freertos_ti-arm-clang_clean
++BUILD_COMBO_EXAMPLE_PROJECTSPEC_CLEAN_ALL += enet_lwip_icssg_cpsw_am243x-evm_r5fss0-0_freertos_ti-arm-clang_clean
+ BUILD_COMBO_EXAMPLE_PROJECTSPEC_CLEAN_ALL += enet_vlan_icssg_am243x-evm_r5fss0-0_freertos_ti-arm-clang_clean
+ BUILD_COMBO_EXAMPLE_PROJECTSPEC_CLEAN_ALL += enet_vlan_icssg_am243x-lp_r5fss0-0_freertos_ti-arm-clang_clean
+ BUILD_COMBO_EXAMPLE_PROJECTSPEC_CLEAN_ALL += enet_icssg_tcpserver_am243x-evm_r5fss0-0_freertos_ti-arm-clang_clean
+@@ -3664,6 +3669,9 @@ clean-private: $(BUILD_COMBO_EXAMPLE_PROJECTSPEC_CLEAN_PRIVATE_ALL)
+  enet_layer2_icssg_cpsw_am243x-evm_r5fss0-0_freertos_ti-arm-clang_clean:
+ 	$(MAKE) -C source/networking/enet/core/examples/enet_layer2_icssg_cpsw/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile_projectspec clean
+ 
++ enet_lwip_icssg_cpsw_am243x-evm_r5fss0-0_freertos_ti-arm-clang_clean:
++	$(MAKE) -C source/networking/enet/core/examples/lwip/enet_lwip_icssg_cpsw/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile_projectspec clean
++
+  enet_vlan_icssg_am243x-evm_r5fss0-0_freertos_ti-arm-clang_clean:
+ 	$(MAKE) -C source/networking/enet/core/examples/enet_vlan_icssg/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile_projectspec clean
+ 
+@@ -4322,6 +4330,7 @@ BUILD_COMBO_EXAMPLE_PROJECTSPEC_EXPORT_ALL += icssg_layer2_dualmac_am243x-lp_r5f
+ BUILD_COMBO_EXAMPLE_PROJECTSPEC_EXPORT_ALL += enet_layer2_icssg_am243x-evm_r5fss0-0_freertos_ti-arm-clang_export
+ BUILD_COMBO_EXAMPLE_PROJECTSPEC_EXPORT_ALL += enet_layer2_icssg_am243x-lp_r5fss0-0_freertos_ti-arm-clang_export
+ BUILD_COMBO_EXAMPLE_PROJECTSPEC_EXPORT_ALL += enet_layer2_icssg_cpsw_am243x-evm_r5fss0-0_freertos_ti-arm-clang_export
++BUILD_COMBO_EXAMPLE_PROJECTSPEC_EXPORT_ALL += enet_lwip_icssg_cpsw_am243x-evm_r5fss0-0_freertos_ti-arm-clang_export
+ BUILD_COMBO_EXAMPLE_PROJECTSPEC_EXPORT_ALL += enet_vlan_icssg_am243x-evm_r5fss0-0_freertos_ti-arm-clang_export
+ BUILD_COMBO_EXAMPLE_PROJECTSPEC_EXPORT_ALL += enet_vlan_icssg_am243x-lp_r5fss0-0_freertos_ti-arm-clang_export
+ BUILD_COMBO_EXAMPLE_PROJECTSPEC_EXPORT_ALL += enet_icssg_tcpserver_am243x-evm_r5fss0-0_freertos_ti-arm-clang_export
+@@ -5622,6 +5631,9 @@ export-private: $(BUILD_COMBO_EXAMPLE_PROJECTSPEC_EXPORT_PRIVATE_ALL)
+  enet_layer2_icssg_cpsw_am243x-evm_r5fss0-0_freertos_ti-arm-clang_export:
+ 	$(MAKE) -C source/networking/enet/core/examples/enet_layer2_icssg_cpsw/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile_projectspec export
+ 
++ enet_lwip_icssg_cpsw_am243x-evm_r5fss0-0_freertos_ti-arm-clang_export:
++	$(MAKE) -C source/networking/enet/core/examples/lwip/enet_lwip_icssg_cpsw/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile_projectspec export
++
+  enet_vlan_icssg_am243x-evm_r5fss0-0_freertos_ti-arm-clang_export:
+ 	$(MAKE) -C source/networking/enet/core/examples/enet_vlan_icssg/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile_projectspec export
+ 
+@@ -6305,6 +6317,7 @@ help:
+ 	@echo  $(MAKE) -s -C source/networking/enet/core/examples/enet_layer2_icssg/icssg_layer2_switch/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile_projectspec [export all clean]
+ 	@echo  $(MAKE) -s -C source/networking/enet/core/examples/enet_layer2_icssg/icssg_layer2_switch/am243x-lp/r5fss0-0_freertos/ti-arm-clang -f makefile_projectspec [export all clean]
+ 	@echo  $(MAKE) -s -C source/networking/enet/core/examples/enet_layer2_icssg_cpsw/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile_projectspec [export all clean]
++	@echo  $(MAKE) -s -C source/networking/enet/core/examples/lwip/enet_lwip_icssg_cpsw/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile_projectspec [export all clean]
+ 	@echo  $(MAKE) -s -C source/networking/enet/core/examples/enet_vlan_icssg/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile_projectspec [export all clean]
+ 	@echo  $(MAKE) -s -C source/networking/enet/core/examples/enet_vlan_icssg/am243x-lp/r5fss0-0_freertos/ti-arm-clang -f makefile_projectspec [export all clean]
+ 	@echo  $(MAKE) -s -C source/networking/enet/core/examples/lwip/enet_icssg_tcpserver/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile_projectspec [export all clean]
+diff --git a/source/networking/enet/.project/project_cpsw_icssg_lwipif_freertos.js b/source/networking/enet/.project/project_cpsw_icssg_lwipif_freertos.js
+new file mode 100644
+index 000000000..5a42d0a81
+--- /dev/null
++++ b/source/networking/enet/.project/project_cpsw_icssg_lwipif_freertos.js
+@@ -0,0 +1,125 @@
++let path = require('path');
++const _ = require('lodash');
++
++const files = {
++    common: [
++        /* lwip if */
++        "lwip2enet.c",
++        "lwip2lwipif.c",
++        "pbufQ.c",
++        "custom_pbuf.c",
++    ],
++};
++
++const filedirs = {
++    common: [
++       "${MCU_PLUS_SDK_PATH}/source/networking/enet/core/lwipif/src",
++    ],
++};
++
++const includes = {
++    common: [
++        "${MCU_PLUS_SDK_PATH}/source/board/ethphy/enet/rtos_drivers/include",
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet",
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/core/utils/include",
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/core",
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/core/include",
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/core/include/core",
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/core/include/phy",
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/phy",
++
++       "${MCU_PLUS_SDK_PATH}/source/networking/enet/core/lwipif/inc",
++       "${MCU_PLUS_SDK_PATH}/source/networking/lwip/lwip-port/include",
++       "${MCU_PLUS_SDK_PATH}/source/networking/lwip/lwip-port/freertos/include",
++       "${MCU_PLUS_SDK_PATH}/source/networking/lwip/lwip-stack/src/include",
++    ],
++};
++
++const socIncludes = {
++    am243x : [
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/soc/k3/am64x_am243x",
++        "${MCU_PLUS_SDK_PATH}/source/networking/lwip/lwip-config/am243x",
++    ],
++};
++
++const cflags = {
++    common: [
++        "-mno-unaligned-access",
++        "-Wno-extra",
++        "-fno-strict-aliasing",
++    ],
++    release: [
++        "-Oz",
++        "-flto",
++    ],
++
++};
++
++const defines_r5f = {
++    common: [
++        "MAKEFILE_BUILD",
++        "ENET_CFG_ASSERT=1",
++        "ENET_CFG_PRINT_ENABLE",
++        "ENET_CFG_TRACE_LEVEL=3",
++        "ENET_ENABLE_PER_CPSW=1",
++        "ENET_ENABLE_PER_ICSSG=1",
++        "ENABLE_ENET_LOG",
++    ],
++    debug: [
++        "ENET_CFG_DEV_ERROR=1",
++        "LWIPIF_INSTRUMENTATION_ENABLED=1",
++        "ENETDMA_INSTRUMENTATION_ENABLED=1",
++    ],
++};
++
++const buildOptionCombos = [
++    { device: "am243x", cpu: "r5f", cgt: "ti-arm-clang", os: "freertos"},
++    { device: "am243x", cpu: "r5f", cgt: "gcc-armv7", os: "freertos"},
++];
++
++function getComponentProperty(device) {
++    let property = {};
++
++    property.dirPath = path.resolve(__dirname, "..");
++    property.type = "library";
++    property.name = "lwipif-cpsw-icssg-freertos";
++    property.tag = "lwipif-cpsw-icssg-freertos";
++    property.isInternal = false;
++
++    deviceBuildCombos = []
++    for (buildCombo of buildOptionCombos)
++    {
++        if (buildCombo.device === device)
++        {
++            deviceBuildCombos.push(buildCombo)
++        }
++    }
++    property.buildOptionCombos = deviceBuildCombos;
++
++    return property;
++}
++
++function getComponentBuildProperty(buildOption) {
++
++    let build_property = {};
++
++    build_property.filedirs = filedirs;
++    build_property.files = files;
++    if(buildOption.cgt.match(/ti-arm-clang*/)){
++        build_property.cflags = cflags;
++    }
++
++    includes.common = _.union(includes.common, socIncludes[device]);
++    build_property.includes = includes;
++
++    if(buildOption.cpu.match(/r5f*/))
++    {
++        build_property.defines = defines_r5f;
++    }
++    return build_property;
++}
++
++module.exports = {
++    getComponentProperty,
++    getComponentBuildProperty,
++};
+\ No newline at end of file
+diff --git a/source/networking/enet/makefile.lwipif-cpsw-icssg-freertos.am243x.r5f.gcc-armv7 b/source/networking/enet/makefile.lwipif-cpsw-icssg-freertos.am243x.r5f.gcc-armv7
+new file mode 100644
+index 000000000..04dce3453
+--- /dev/null
++++ b/source/networking/enet/makefile.lwipif-cpsw-icssg-freertos.am243x.r5f.gcc-armv7
+@@ -0,0 +1,145 @@
++
++export MCU_PLUS_SDK_PATH?=$(abspath ../../..)
++include $(MCU_PLUS_SDK_PATH)/imports.mak
++
++CG_TOOL_ROOT=$(CGT_GCC_ARMV7_PATH)
++
++CC=$(CGT_GCC_ARMV7_PATH)/bin/arm-none-eabi-gcc
++AR=$(CGT_GCC_ARMV7_PATH)/bin/arm-none-eabi-gcc-ar
++
++PROFILE?=release
++ConfigName:=$(PROFILE)
++
++LIBNAME:=lwipif-cpsw-icssg-freertos.am243x.r5f.gcc-armv7.$(PROFILE).lib
++
++FILES_common := \
++    lwip2enet.c \
++    lwip2lwipif.c \
++    pbufQ.c \
++    custom_pbuf.c \
++
++FILES_PATH_common = \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/lwipif/src \
++
++INCLUDES_common := \
++    -I${CG_TOOL_ROOT}/arm-none-eabi/include \
++    -I${MCU_PLUS_SDK_PATH}/source \
++    -I${MCU_PLUS_SDK_PATH}/source/board/ethphy/enet/rtos_drivers/include \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core/utils/include \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core/include \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core/include/core \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core/include/phy \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/phy \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core/lwipif/inc \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/lwip/lwip-port/include \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/lwip/lwip-port/freertos/include \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/lwip/lwip-stack/src/include \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/soc/k3/am64x_am243x \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/lwip/lwip-config/am243x \
++    -I${MCU_PLUS_SDK_PATH}/source/kernel/freertos/FreeRTOS-Kernel/include \
++    -I${MCU_PLUS_SDK_PATH}/source/kernel/freertos/portable/TI_ARM_CLANG/ARM_CR5F \
++    -I${MCU_PLUS_SDK_PATH}/source/kernel/freertos/config/am243x/r5f \
++
++DEFINES_common := \
++    -DSOC_AM243X \
++    -DMAKEFILE_BUILD \
++    -DENET_CFG_ASSERT=1 \
++    -DENET_CFG_PRINT_ENABLE \
++    -DENET_CFG_TRACE_LEVEL=3 \
++    -DENET_ENABLE_PER_CPSW=1 \
++    -DENET_ENABLE_PER_ICSSG=1 \
++    -DENABLE_ENET_LOG \
++    -DOS_FREERTOS \
++
++DEFINES_debug := \
++    -DENET_CFG_DEV_ERROR=1 \
++    -DLWIPIF_INSTRUMENTATION_ENABLED=1 \
++    -DENETDMA_INSTRUMENTATION_ENABLED=1 \
++
++CFLAGS_common := \
++    -mcpu=cortex-r5 \
++    -mfloat-abi=hard \
++    -mfpu=vfpv3-d16 \
++    -Wall \
++    -Werror \
++    -mthumb \
++    -g \
++    -Wno-unused-function \
++    -Wno-enum-compare \
++    -Wno-uninitialized \
++    -Wno-address-of-packed-member \
++    -Wno-int-to-pointer-cast \
++    -Wno-stringop-truncation \
++    -fgnu89-inline \
++    -Wno-pointer-to-int-cast \
++    -Wno-unused-variable \
++    -Wno-unused-but-set-variable \
++    -fdata-sections \
++    -ffunction-sections \
++
++CFLAGS_debug := \
++    -D_DEBUG_=1 \
++
++CFLAGS_release := \
++    -O2 \
++
++ARFLAGS_common := \
++    cr \
++
++FILES := $(FILES_common) $(FILES_$(PROFILE))
++ASMFILES := $(ASMFILES_common) $(ASMFILES_$(PROFILE))
++FILES_PATH := $(FILES_PATH_common) $(FILES_PATH_$(PROFILE))
++CFLAGS := $(CFLAGS_common) $(CFLAGS_$(PROFILE))
++ASMFLAGS := $(CFLAGS_common) $(CFLAGS_$(PROFILE))
++ifeq ($(CPLUSPLUS_BUILD), yes)
++CFLAGS += $(CFLAGS_cpp_common)
++endif
++DEFINES := $(DEFINES_common) $(DEFINES_$(PROFILE))
++INCLUDES := $(INCLUDES_common) $(INCLUDE_$(PROFILE))
++ARFLAGS := $(ARFLAGS_common) $(ARFLAGS_$(PROFILE))
++
++LIBDIR := lib
++OBJDIR := obj/am243x/gcc-armv7/$(PROFILE)/r5f/lwipif-cpsw-icssg-freertos/freertos/
++OBJS := $(FILES:%.c=%.obj)
++OBJS += $(ASMFILES:%.S=%.obj)
++DEPS := $(FILES:%.c=%.d)
++
++vpath %.obj $(OBJDIR)
++vpath %.c $(FILES_PATH)
++vpath %.S $(FILES_PATH)
++
++$(OBJDIR)/%.obj %.obj: %.c
++	@echo  Compiling: $(LIBNAME): $<
++	$(CC) -c $(CFLAGS) $(INCLUDES) $(DEFINES) -MMD -MT $@ -o $(OBJDIR)/$@ $<
++
++$(OBJDIR)/%.obj %.obj: %.S
++	@echo  Compiling: $(LIBNAME): $<
++	$(CC) -c -x assembler-with-cpp $(CFLAGS) $(INCLUDES) $(DEFINES) -o $(OBJDIR)$@ $<
++
++all: $(LIBDIR)/$(LIBNAME)
++
++$(LIBDIR)/$(LIBNAME): $(OBJS) | $(LIBDIR)
++	@echo  .
++	@echo  Archiving: $(LIBNAME) to $@ ...
++	$(AR) $(ARFLAGS) $@ $(addprefix $(OBJDIR), $(OBJS))
++	@echo  Archiving: $(LIBNAME) Done !!!
++	@echo  .
++
++clean:
++	@echo  Cleaning: $(LIBNAME) ...
++	$(RMDIR) $(OBJDIR)
++	$(RM) $(LIBDIR)/$(LIBNAME)
++
++scrub:
++	@echo  Scrubing: $(LIBNAME) ...
++	-$(RMDIR) obj/
++	-$(RMDIR) lib/
++
++$(OBJS): | $(OBJDIR)
++
++$(LIBDIR) $(OBJDIR):
++	$(MKDIR) $@
++
++-include $(addprefix $(OBJDIR)/, $(DEPS))
+diff --git a/source/networking/enet/makefile.lwipif-cpsw-icssg-freertos.am243x.r5f.ti-arm-clang b/source/networking/enet/makefile.lwipif-cpsw-icssg-freertos.am243x.r5f.ti-arm-clang
+new file mode 100644
+index 000000000..65cc8ace9
+--- /dev/null
++++ b/source/networking/enet/makefile.lwipif-cpsw-icssg-freertos.am243x.r5f.ti-arm-clang
+@@ -0,0 +1,156 @@
++
++export MCU_PLUS_SDK_PATH?=$(abspath ../../..)
++include $(MCU_PLUS_SDK_PATH)/imports.mak
++
++CG_TOOL_ROOT=$(CGT_TI_ARM_CLANG_PATH)
++
++CC=$(CGT_TI_ARM_CLANG_PATH)/bin/tiarmclang
++AR=$(CGT_TI_ARM_CLANG_PATH)/bin/tiarmar
++
++PROFILE?=release
++ConfigName:=$(PROFILE)
++
++LIBNAME:=lwipif-cpsw-icssg-freertos.am243x.r5f.ti-arm-clang.$(PROFILE).lib
++
++FILES_common := \
++    lwip2enet.c \
++    lwip2lwipif.c \
++    pbufQ.c \
++    custom_pbuf.c \
++
++FILES_PATH_common = \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/lwipif/src \
++
++INCLUDES_common := \
++    -I${CG_TOOL_ROOT}/include/c \
++    -I${MCU_PLUS_SDK_PATH}/source \
++    -I${MCU_PLUS_SDK_PATH}/source/board/ethphy/enet/rtos_drivers/include \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core/utils/include \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core/include \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core/include/core \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core/include/phy \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/phy \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core/lwipif/inc \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/lwip/lwip-port/include \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/lwip/lwip-port/freertos/include \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/lwip/lwip-stack/src/include \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/soc/k3/am64x_am243x \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/lwip/lwip-config/am243x \
++    -I${MCU_PLUS_SDK_PATH}/source/kernel/freertos/FreeRTOS-Kernel/include \
++    -I${MCU_PLUS_SDK_PATH}/source/kernel/freertos/portable/TI_ARM_CLANG/ARM_CR5F \
++    -I${MCU_PLUS_SDK_PATH}/source/kernel/freertos/config/am243x/r5f \
++
++DEFINES_common := \
++    -DSOC_AM243X \
++    -DMAKEFILE_BUILD \
++    -DENET_CFG_ASSERT=1 \
++    -DENET_CFG_PRINT_ENABLE \
++    -DENET_CFG_TRACE_LEVEL=3 \
++    -DENET_ENABLE_PER_CPSW=1 \
++    -DENET_ENABLE_PER_ICSSG=1 \
++    -DENABLE_ENET_LOG \
++    -DOS_FREERTOS \
++
++DEFINES_debug := \
++    -DENET_CFG_DEV_ERROR=1 \
++    -DLWIPIF_INSTRUMENTATION_ENABLED=1 \
++    -DENETDMA_INSTRUMENTATION_ENABLED=1 \
++
++CFLAGS_common := \
++    -mcpu=cortex-r5 \
++    -mfloat-abi=hard \
++    -mfpu=vfpv3-d16 \
++    -mthumb \
++    -Wall \
++    -Werror \
++    -g \
++    -Wno-gnu-variable-sized-type-not-at-end \
++    -Wno-unused-function \
++    -mno-unaligned-access \
++    -Wno-extra \
++    -fno-strict-aliasing \
++
++CFLAGS_release := \
++    -Os \
++    -Oz \
++    -flto \
++
++CFLAGS_cpp_common := \
++    -Wno-c99-designator \
++    -Wno-extern-c-compat \
++    -Wno-c++11-narrowing \
++    -Wno-reorder-init-list \
++    -Wno-register \
++    -Wno-writable-strings \
++    -Wno-enum-compare \
++    -Wno-reserved-user-defined-literal \
++    -Wno-unused-const-variable \
++    -Wno-vla-cxx-extension \
++    -x c++ \
++
++CFLAGS_debug := \
++    -D_DEBUG_=1 \
++
++ARFLAGS_common := \
++    rc \
++
++FILES := $(FILES_common) $(FILES_$(PROFILE))
++ASMFILES := $(ASMFILES_common) $(ASMFILES_$(PROFILE))
++FILES_PATH := $(FILES_PATH_common) $(FILES_PATH_$(PROFILE))
++CFLAGS := $(CFLAGS_common) $(CFLAGS_$(PROFILE))
++ASMFLAGS := $(CFLAGS_common) $(CFLAGS_$(PROFILE))
++ifeq ($(INSTRUMENTATION_MODE), yes)
++CFLAGS += -fprofile-instr-generate -fcoverage-mapping
++endif
++ifeq ($(CPLUSPLUS_BUILD), yes)
++CFLAGS += $(CFLAGS_cpp_common)
++endif
++DEFINES := $(DEFINES_common) $(DEFINES_$(PROFILE))
++INCLUDES := $(INCLUDES_common) $(INCLUDE_$(PROFILE))
++ARFLAGS := $(ARFLAGS_common) $(ARFLAGS_$(PROFILE))
++
++LIBDIR := lib
++OBJDIR := obj/am243x/ti-arm-clang/$(PROFILE)/r5f/lwipif-cpsw-icssg-freertos/freertos/
++OBJS := $(FILES:%.c=%.obj)
++OBJS += $(ASMFILES:%.S=%.obj)
++DEPS := $(FILES:%.c=%.d)
++
++vpath %.obj $(OBJDIR)
++vpath %.c $(FILES_PATH)
++vpath %.S $(FILES_PATH)
++
++$(OBJDIR)/%.obj %.obj: %.c
++	@echo  Compiling: $(LIBNAME): $<
++	$(CC) -c $(CFLAGS) $(INCLUDES) $(DEFINES) -MMD -o $(OBJDIR)/$@ $<
++
++$(OBJDIR)/%.obj %.obj: %.S
++	@echo  Compiling: $(LIBNAME): $<
++	$(CC) -c $(ASMFLAGS) $(INCLUDES) $(DEFINES) -o $(OBJDIR)/$@ $<
++
++all: $(LIBDIR)/$(LIBNAME)
++
++$(LIBDIR)/$(LIBNAME): $(OBJS) | $(LIBDIR)
++	@echo  .
++	@echo  Archiving: $(LIBNAME) to $@ ...
++	$(AR) $(ARFLAGS) $@ $(addprefix $(OBJDIR), $(OBJS))
++	@echo  Archiving: $(LIBNAME) Done !!!
++	@echo  .
++
++clean:
++	@echo  Cleaning: $(LIBNAME) ...
++	$(RMDIR) $(OBJDIR)
++	$(RM) $(LIBDIR)/$(LIBNAME)
++
++scrub:
++	@echo  Scrubing: $(LIBNAME) ...
++	-$(RMDIR) obj/
++	-$(RMDIR) lib/
++
++$(OBJS): | $(OBJDIR)
++
++$(LIBDIR) $(OBJDIR):
++	$(MKDIR) $@
++
++-include $(addprefix $(OBJDIR)/, $(DEPS))
+-- 
+2.43.0
+
