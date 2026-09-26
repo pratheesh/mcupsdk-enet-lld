@@ -1,0 +1,279 @@
+%%{
+    /*
+     * CPSW + ICSSG on one core: public lwIP interface API and the callbacks of
+     * the Enet lwIP interface library (lwipif).
+     *
+     * Each peripheral module above keeps its own netifs, lwIP tasks and RX
+     * custom pbuf pool (namespaced _Icssg / _Cpsw). The application sees one
+     * global netif index space (ICSSG netifs first); the lwipif library passes
+     * the Enet type with every callback, which selects the peripheral. DMA
+     * channel ids passed by the library are the global ones from the netif
+     * channel maps, the CPSW functions take their own (local) channel ids.
+     */
+    let combo = system.getScript("/networking/common/enet_combo");
+    let sides = [];
+    if (combo.getModuleNetifCount(combo.icssModuleName) > 0)
+    {
+        sides.push({ name: "Icssg", isCpsw: false });
+    }
+    if (combo.getModuleNetifCount(combo.cpswModuleName) > 0)
+    {
+        sides.push({ name: "Cpsw", isCpsw: true });
+    }
+    let both = (sides.length === 2);
+    let only = sides[0].name;
+    /* Condition selecting the CPSW side for an Enet type expression */
+    let isCpsw = (enetType) => `Enet_isCpswFamily(${enetType})`;
+%%}
+
+/* ========================================================================== */
+/*          CPSW + ICSSG on one core: lwIP interface for both peripherals     */
+/* ========================================================================== */
+
+#define LWIPIFAPP_COMBO_ICSSG_NETIF_NUM     (ENET_SYSCFG_NETIF_COUNT_ICSSG)
+#define LWIPIFAPP_COMBO_ICSSG_TX_CH_NUM     (`combo.getIcssgTxChannelCount()`U)
+#define LWIPIFAPP_COMBO_ICSSG_RX_CH_NUM     (`combo.getIcssgRxChannelCount()`U)
+
+Lwip2Enet_RxMode_t LwipifEnetAppCb_getRxMode(Enet_Type enetType, uint32_t instId);
+
+typedef struct LwipifEnetAppCombo_Object_s
+{
+    /*! Set once the lwIP resources of every peripheral are set up */
+    bool isInitDone;
+} LwipifEnetAppCombo_Object;
+
+static LwipifEnetAppCombo_Object gLwipifEnetAppComboObj = { .isInitDone = false };
+
+/* Free pbuf nodes for the RX packets of both peripherals: the lwipif library
+ * takes one pbuf node array, from the first netif it opens */
+static pbufNode gLwipifEnetAppComboFreePbufArr[
+% for (let side of sides) {
+    (sizeof(gFreePbufArr_`side.name`) / sizeof(pbufNode)) +
+% }
+    0U];
+
+% if (both) {
+static bool LwipifEnetAppCombo_isCpswNetifIdx(uint32_t netifIdx)
+{
+    return (netifIdx >= LWIPIFAPP_COMBO_ICSSG_NETIF_NUM);
+}
+
+% }
+LwipifEnetApp_Handle LwipifEnetApp_getHandle(void)
+{
+    return (LwipifEnetApp_Handle)&gLwipifEnetAppComboObj;
+}
+
+struct netif* LwipifEnetApp_netifOpen(LwipifEnetApp_Handle handle, uint32_t netifIdx, const ip4_addr_t *ipaddr, const ip4_addr_t *netmask, const ip4_addr_t *gw)
+{
+% if (both) {
+    struct netif *netif;
+
+    if (LwipifEnetAppCombo_isCpswNetifIdx(netifIdx))
+    {
+        netif = LwipifEnetApp_netifOpen_Cpsw(LwipifEnetApp_getHandle_Cpsw(),
+                                             netifIdx - LWIPIFAPP_COMBO_ICSSG_NETIF_NUM,
+                                             ipaddr, netmask, gw);
+    }
+    else
+    {
+        netif = LwipifEnetApp_netifOpen_Icssg(LwipifEnetApp_getHandle_Icssg(), netifIdx,
+                                              ipaddr, netmask, gw);
+    }
+
+    return netif;
+% } else {
+    return LwipifEnetApp_netifOpen_`only`(LwipifEnetApp_getHandle_`only`(),
+                                          netifIdx - `only === "Cpsw" ? "LWIPIFAPP_COMBO_ICSSG_NETIF_NUM" : "0U"`,
+                                          ipaddr, netmask, gw);
+% }
+}
+
+void LwipifEnetApp_netifClose(LwipifEnetApp_Handle handle, const uint32_t netifIdx)
+{
+% if (both) {
+    if (LwipifEnetAppCombo_isCpswNetifIdx(netifIdx))
+    {
+        LwipifEnetApp_netifClose_Cpsw(LwipifEnetApp_getHandle_Cpsw(),
+                                      netifIdx - LWIPIFAPP_COMBO_ICSSG_NETIF_NUM);
+    }
+    else
+    {
+        LwipifEnetApp_netifClose_Icssg(LwipifEnetApp_getHandle_Icssg(), netifIdx);
+    }
+% } else {
+    LwipifEnetApp_netifClose_`only`(LwipifEnetApp_getHandle_`only`(),
+                                    netifIdx - `only === "Cpsw" ? "LWIPIFAPP_COMBO_ICSSG_NETIF_NUM" : "0U"`);
+% }
+}
+
+struct netif* LwipifEnetApp_getNetifFromId(LwipifEnetApp_Handle handle, uint32_t netifIdx)
+{
+% if (both) {
+    struct netif *netif;
+
+    if (LwipifEnetAppCombo_isCpswNetifIdx(netifIdx))
+    {
+        netif = LwipifEnetApp_getNetifFromId_Cpsw(LwipifEnetApp_getHandle_Cpsw(),
+                                                  netifIdx - LWIPIFAPP_COMBO_ICSSG_NETIF_NUM);
+    }
+    else
+    {
+        netif = LwipifEnetApp_getNetifFromId_Icssg(LwipifEnetApp_getHandle_Icssg(), netifIdx);
+    }
+
+    return netif;
+% } else {
+    return LwipifEnetApp_getNetifFromId_`only`(LwipifEnetApp_getHandle_`only`(),
+                                               netifIdx - `only === "Cpsw" ? "LWIPIFAPP_COMBO_ICSSG_NETIF_NUM" : "0U"`);
+% }
+}
+
+int32_t LwipifEnetApp_getNetifIdx(LwipifEnetApp_Handle handle, struct netif* netif)
+{
+    int32_t idx = -1;
+
+% for (let side of sides) {
+    if (idx < 0)
+    {
+        idx = LwipifEnetApp_getNetifIdx_`side.name`(LwipifEnetApp_getHandle_`side.name`(), netif);
+%   if (side.isCpsw) {
+        if (idx >= 0)
+        {
+            idx += (int32_t)LWIPIFAPP_COMBO_ICSSG_NETIF_NUM;
+        }
+%   }
+    }
+% }
+
+    return idx;
+}
+
+void LwipifEnetApp_startSchedule(LwipifEnetApp_Handle handle, struct netif *netif)
+{
+% if (both) {
+    if (LwipifEnetApp_getNetifIdx_Icssg(LwipifEnetApp_getHandle_Icssg(), netif) >= 0)
+    {
+        LwipifEnetApp_startSchedule_Icssg(LwipifEnetApp_getHandle_Icssg(), netif);
+    }
+    else
+    {
+        LwipifEnetApp_startSchedule_Cpsw(LwipifEnetApp_getHandle_Cpsw(), netif);
+    }
+% } else {
+    LwipifEnetApp_startSchedule_`only`(LwipifEnetApp_getHandle_`only`(), netif);
+% }
+}
+
+/* ------------------ Callbacks of the Enet lwIP interface library ---------- */
+
+void LwipifEnetAppCb_getEnetLwipIfInstInfo(Enet_Type enetType, uint32_t instId, LwipifEnetAppIf_GetEnetLwipIfInstInfo *outArgs)
+{
+% if (both) {
+    if (`isCpsw("enetType")`)
+    {
+        LwipifEnetAppCb_getEnetLwipIfInstInfo_Cpsw(enetType, instId, outArgs);
+    }
+    else
+    {
+        LwipifEnetAppCb_getEnetLwipIfInstInfo_Icssg(enetType, instId, outArgs);
+    }
+% } else {
+    LwipifEnetAppCb_getEnetLwipIfInstInfo_`only`(enetType, instId, outArgs);
+% }
+
+    if (!gLwipifEnetAppComboObj.isInitDone)
+    {
+        /* RX custom pbufs of every peripheral */
+% for (let side of sides) {
+        LwipifEnetApp_initRxPool_`side.name`();
+% }
+        gLwipifEnetAppComboObj.isInitDone = true;
+    }
+
+    /* Resources shared by the netifs of both peripherals */
+    outArgs->isPortLinkedFxn = &EnetApp_isPortLinked;
+    outArgs->pPbufInfo       = gLwipifEnetAppComboFreePbufArr;
+    outArgs->pPbufInfoSize   = ENET_ARRAYSIZE(gLwipifEnetAppComboFreePbufArr);
+}
+
+void LwipifEnetAppCb_getTxHandleInfo(LwipifEnetAppIf_GetTxHandleInArgs *inArgs,
+                                     LwipifEnetAppIf_TxHandleInfo *outArgs)
+{
+% if (both) {
+    if (`isCpsw("inArgs->enetType")`)
+    {
+        LwipifEnetAppIf_GetTxHandleInArgs cpswInArgs = *inArgs;
+
+        cpswInArgs.chId -= LWIPIFAPP_COMBO_ICSSG_TX_CH_NUM;
+        LwipifEnetAppCb_getTxHandleInfo_Cpsw(&cpswInArgs, outArgs);
+    }
+    else
+    {
+        LwipifEnetAppCb_getTxHandleInfo_Icssg(inArgs, outArgs);
+    }
+% } else if (only === "Cpsw") {
+    LwipifEnetAppIf_GetTxHandleInArgs cpswInArgs = *inArgs;
+
+    cpswInArgs.chId -= LWIPIFAPP_COMBO_ICSSG_TX_CH_NUM;
+    LwipifEnetAppCb_getTxHandleInfo_Cpsw(&cpswInArgs, outArgs);
+% } else {
+    LwipifEnetAppCb_getTxHandleInfo_Icssg(inArgs, outArgs);
+% }
+}
+
+void LwipifEnetAppCb_getRxHandleInfo(LwipifEnetAppIf_GetRxHandleInArgs *inArgs,
+                                     LwipifEnetAppIf_RxHandleInfo *outArgs)
+{
+% if (both) {
+    if (`isCpsw("inArgs->enetType")`)
+    {
+        LwipifEnetAppIf_GetRxHandleInArgs cpswInArgs = *inArgs;
+
+        cpswInArgs.chId -= LWIPIFAPP_COMBO_ICSSG_RX_CH_NUM;
+        LwipifEnetAppCb_getRxHandleInfo_Cpsw(&cpswInArgs, outArgs);
+    }
+    else
+    {
+        LwipifEnetAppCb_getRxHandleInfo_Icssg(inArgs, outArgs);
+    }
+% } else if (only === "Cpsw") {
+    LwipifEnetAppIf_GetRxHandleInArgs cpswInArgs = *inArgs;
+
+    cpswInArgs.chId -= LWIPIFAPP_COMBO_ICSSG_RX_CH_NUM;
+    LwipifEnetAppCb_getRxHandleInfo_Cpsw(&cpswInArgs, outArgs);
+% } else {
+    LwipifEnetAppCb_getRxHandleInfo_Icssg(inArgs, outArgs);
+% }
+}
+%%{
+    /* Callbacks forwarded unchanged to the peripheral of the Enet type */
+    let forwarded = [
+        { ret: "void", name: "LwipifEnetAppCb_releaseTxHandle", params: "LwipifEnetAppIf_ReleaseTxHandleInfo *releaseInfo", args: "releaseInfo", enetType: "releaseInfo->enetType" },
+        { ret: "void", name: "LwipifEnetAppCb_releaseRxHandle", params: "LwipifEnetAppIf_ReleaseRxHandleInfo *releaseInfo", args: "releaseInfo", enetType: "releaseInfo->enetType" },
+        { ret: "Lwip2Enet_RxMode_t", name: "LwipifEnetAppCb_getRxMode", params: "Enet_Type enetType, uint32_t instId", args: "enetType, instId", enetType: "enetType" },
+        { ret: "void", name: "LwipifEnetApp_getRxChIDs", params: "const Enet_Type enetType, const uint32_t instId, uint32_t netifIdx, uint32_t* pRxChIdCount, uint32_t rxChIdList[LWIPIF_MAX_RX_CHANNELS_PER_PHERIPHERAL]", args: "enetType, instId, netifIdx, pRxChIdCount, rxChIdList", enetType: "enetType" },
+        { ret: "void", name: "LwipifEnetApp_getTxChIDs", params: "const Enet_Type enetType, const uint32_t instId, uint32_t netifIdx, uint32_t* pTxChIdCount, uint32_t txChIdList[LWIPIF_MAX_TX_CHANNELS_PER_PHERIPHERAL]", args: "enetType, instId, netifIdx, pTxChIdCount, txChIdList", enetType: "enetType" },
+        { ret: "void", name: "LwipifEnetApp_getProxyArpRxChIDs", params: "const Enet_Type enetType, const uint32_t instId, uint32_t netifIdx, uint32_t* pRxChIdCount, uint32_t rxChIdList[LWIPIF_MAX_RX_CHANNELS_PER_PHERIPHERAL]", args: "enetType, instId, netifIdx, pRxChIdCount, rxChIdList", enetType: "enetType" },
+        { ret: "void", name: "LwipifEnetApp_setupProxyArphandler", params: "const Enet_Type enetType, const uint32_t instId, Lwip2Enet_RxHandle hRx", args: "enetType, instId, hRx", enetType: "enetType" },
+    ];
+%%}
+% for (let f of forwarded) {
+% let retKw = (f.ret === "void") ? "" : "return ";
+
+`f.ret` `f.name`(`f.params`)
+{
+%   if (both) {
+    if (`isCpsw(f.enetType)`)
+    {
+        `retKw``f.name`_Cpsw(`f.args`);
+    }
+    else
+    {
+        `retKw``f.name`_Icssg(`f.args`);
+    }
+%   } else {
+    `retKw``f.name`_`only`(`f.args`);
+%   }
+}
+% }

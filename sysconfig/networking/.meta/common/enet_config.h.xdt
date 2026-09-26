@@ -35,8 +35,17 @@
  *
  *  \brief Enet config header file.
  */
+% let combo = system.getScript("/networking/common/enet_combo");
+% if (combo.isComboMode()) {
+#ifndef TI_ENET_CONFIG_H_COMBO_
+#define TI_ENET_CONFIG_H_COMBO_
+% }
 % for(let subTemplate of args) {
     % if (subTemplate.enet_config) {
-`system.getTemplate(subTemplate.enet_config)(subTemplate.moduleName)`
+`combo.renderSubTemplate(subTemplate, "enet_config")`
     % }
+% }
+% if (combo.isComboMode()) {
+`combo.renderComboTemplate("enet_config_h")`
+#endif /* TI_ENET_CONFIG_H_COMBO_ */
 % }

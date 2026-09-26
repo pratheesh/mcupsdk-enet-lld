@@ -1,0 +1,40 @@
+%%{
+    let combo = system.getScript("/networking/common/enet_combo");
+    /* Without MCM a module has its own driver close; the public one exists
+     * when at least one module has MCM disabled */
+    let hasDriverClose = !combo.isMcmEnabled(combo.icssModuleName) ||
+                         !combo.isMcmEnabled(combo.cpswModuleName);
+%%}
+
+/* ========================================================================== */
+/*       CPSW + ICSSG on one core: driver API for both peripherals            */
+/* ========================================================================== */
+
+/*!
+ * \brief  Initialize Enet Driver from Application (once for CPSW and ICSSG).
+ */
+void EnetApp_driverInit(void);
+
+/*!
+ * \brief  Denitialize Enet Driver from Application (once for CPSW and ICSSG).
+ */
+void EnetApp_driverDeInit(void);
+
+/*!
+ * \brief  Opens the CPSW or ICSSG Enet Driver from Application.
+ *
+ * \param enetType  Enet Peripheral type
+ * \param instId    Enet Peripheral instance id
+ */
+int32_t EnetApp_driverOpen(Enet_Type enetType, uint32_t instId);
+% if (hasDriverClose) {
+
+/*!
+ * \brief  Closes the CPSW or ICSSG Enet Driver from Application.
+ *         Only for a peripheral with MCM disabled in SysConfig.
+ *
+ * \param enetType  Enet Peripheral type
+ * \param instId    Enet Peripheral instance id
+ */
+void EnetApp_driverClose(Enet_Type enetType, uint32_t instId);
+% }

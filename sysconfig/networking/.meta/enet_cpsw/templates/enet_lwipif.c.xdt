@@ -1091,5 +1091,15 @@ static void LwipifEnetApp_postPollLink(ClockP_Object *clkObj, void *arg)
         SemaphoreP_post(hPollSem);
     }
 }
+% if (system.getScript("/networking/common/enet_combo").isComboMode()) {
+
+/* CPSW + ICSSG on one core: the lwIP interface library asks only the module of
+ * the first opened netif for its lwIP resources, so the combo layer sets up
+ * the RX custom pbuf pool of every module with this function. */
+void LwipifEnetApp_initRxPool(void)
+{
+    LWIP_MEMPOOL_INIT(RX_POOL);
+}
+% }
 
 %}

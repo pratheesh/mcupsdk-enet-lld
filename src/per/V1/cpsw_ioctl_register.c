@@ -66,6 +66,11 @@
 #include <networking/enet/core/src/per/cpsw_intervlan.h>
 #include <priv/per/cpsw_ioctl_priv.h>
 
+/* Renames the register functions shared with the other Ethernet peripheral
+ * family when both are built into one library. No-op otherwise. */
+#define ENET_IOCTL_REGISTER_PER_CPSW
+#include <priv/core/enet_ioctl_register_multi_priv.h>
+
 
 /* ========================================================================== */
 /*                           Macros & Typedefs                                */
