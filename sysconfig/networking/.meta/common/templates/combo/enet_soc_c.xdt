@@ -1,0 +1,501 @@
+%%{
+    /*
+     * CPSW + ICSSG on one core: public Enet SoC / application API.
+     *
+     * Each peripheral's generated code above is namespaced (_Icssg / _Cpsw
+     * suffixes). The functions below are the public names used by the Enet LLD
+     * library and by applications; they forward each call to the peripheral
+     * that owns the Enet type, handle, instance index or DMA channel index.
+     *
+     * Global index spaces: ICSSG instances and DMA channels come first,
+     * followed by the CPSW ones.
+     */
+    let combo = system.getScript("/networking/common/enet_combo");
+%%}
+
+/* ========================================================================== */
+/*          CPSW + ICSSG on one core: dispatch to each peripheral             */
+/* ========================================================================== */
+
+#include <enet_apputils.h>
+#include <enet_appsoc.h>
+#include <enet_apprm.h>
+#include <enet_udmautils.h>
+#include <include/core/enet_types.h>
+
+#define ENETAPP_COMBO_ICSSG_INST_NUM          (`combo.getIcssgInstanceCount()`U)
+#define ENETAPP_COMBO_ICSSG_TX_CH_NUM         (`combo.getIcssgTxChannelCount()`U)
+#define ENETAPP_COMBO_ICSSG_RX_CH_NUM         (`combo.getIcssgRxChannelCount()`U)
+
+% for (let side of ["Icssg", "Cpsw"]) {
+/* Defined in the `side === "Icssg" ? "ICSSG" : "CPSW"` part of ti_enet_config.c / ti_enet_open_close.c */
+void EnetApp_driverInit_`side`(void);
+void EnetApp_driverDeInit_`side`(void);
+int32_t EnetApp_driverOpen_`side`(Enet_Type enetType, uint32_t instId);
+void EnetApp_driverClose_`side`(Enet_Type enetType, uint32_t instId);
+void EnetApp_getEnetInstInfo_`side`(uint32_t enetInstanceId, Enet_Type *enetType, uint32_t *instId);
+void EnetApp_getEnetInstMacInfo_`side`(Enet_Type enetType, uint32_t instId, Enet_MacPort macPortList[], uint8_t *numMacPorts);
+void EnetApp_acquireHandleInfo_`side`(Enet_Type enetType, uint32_t instId, EnetApp_HandleInfo *handleInfo);
+void EnetApp_releaseHandleInfo_`side`(Enet_Type enetType, uint32_t instId);
+void EnetApp_coreAttach_`side`(Enet_Type enetType, uint32_t instId, uint32_t coreId, EnetPer_AttachCoreOutArgs *attachInfo);
+void EnetApp_coreDetach_`side`(Enet_Type enetType, uint32_t instId, uint32_t coreId, uint32_t coreKey);
+bool EnetApp_isPortLinked_`side`(Enet_Handle hEnet);
+void EnetApp_getTxDmaHandle_`side`(uint32_t enetTxDmaChId, const EnetApp_GetDmaHandleInArgs *inArgs, EnetApp_GetTxDmaHandleOutArgs *outArgs);
+void EnetApp_getRxDmaHandle_`side`(uint32_t enetRxDmaChId, const EnetApp_GetDmaHandleInArgs *inArgs, EnetApp_GetRxDmaHandleOutArgs *outArgs);
+void EnetApp_closeTxDma_`side`(uint32_t enetTxDmaChId, Enet_Handle hEnet, uint32_t coreKey, uint32_t coreId, EnetDma_PktQ *fqPktInfoQ, EnetDma_PktQ *cqPktInfoQ);
+void EnetApp_closeRxDma_`side`(uint32_t enetRxDmaChId, Enet_Handle hEnet, uint32_t coreKey, uint32_t coreId, EnetDma_PktQ *fqPktInfoQ, EnetDma_PktQ *cqPktInfoQ);
+void EnetApp_getMacAddress_`side`(uint32_t enetRxDmaChId, EnetApp_GetMacAddrOutArgs *outArgs);
+int32_t EnetApp_applyClassifier_`side`(Enet_Handle hEnet, uint32_t coreId, uint8_t *dstMacAddr, uint32_t vlanId, uint32_t ethType, uint32_t rxFlowIdx);
+int32_t EnetApp_filterPriorityPacketsCfg_`side`(Enet_Handle hEnet, uint32_t coreId);
+int32_t EnetApp_getRxTimeStamp_`side`(Enet_Handle hEnet, uint32_t coreId, EnetTimeSync_GetEthTimestampInArgs *inArgs, uint64_t *ts);
+int32_t EnetApp_setTimeStampComplete_`side`(Enet_Handle hEnet, uint32_t coreId);
+% }
+Udma_DrvHandle EnetApp_getUdmaInstanceHandle_Icssg(void);
+void EnetAppUtils_setCommonRxFlowPrms_Icssg(EnetUdma_OpenRxFlowPrms *pRxFlowPrms);
+void EnetAppUtils_setCommonTxChPrms_Icssg(EnetUdma_OpenTxChPrms *pTxChPrms);
+int32_t EnetAppSoc_fillMacAddrList_Icssg(uint8_t macAddr[][ENET_MAC_ADDR_LEN], uint32_t maxMacEntries, uint32_t *pAvailMacEntries);
+
+static bool EnetAppCombo_isIcssgHandle(Enet_Handle hEnet)
+{
+    bool isIcssg = false;
+    uint32_t i;
+
+    for (i = 0U; i < EnetSoc_getEnetNum_Icssg(); i++)
+    {
+        if (EnetSoc_getEnetHandleByIdx_Icssg(i) == hEnet)
+        {
+            isIcssg = true;
+            break;
+        }
+    }
+
+    return isIcssg;
+}
+
+/* ---------------------------- Enet SoC (enet_soc.h) ----------------------- */
+
+int32_t EnetSoc_init(void)
+{
+    int32_t status;
+
+    status = EnetSoc_init_Icssg();
+    if (status == ENET_SOK)
+    {
+        status = EnetSoc_init_Cpsw();
+    }
+
+    return status;
+}
+
+void EnetSoc_deinit(void)
+{
+    EnetSoc_deinit_Cpsw();
+    EnetSoc_deinit_Icssg();
+}
+
+EnetDma_Handle EnetSoc_getDmaHandle(Enet_Type enetType,
+                                    uint32_t instId)
+{
+    return Enet_isCpswFamily(enetType) ? EnetSoc_getDmaHandle_Cpsw(enetType, instId) :
+                                         EnetSoc_getDmaHandle_Icssg(enetType, instId);
+}
+
+Enet_Handle EnetSoc_getEnetHandleByIdx(uint32_t idx)
+{
+    uint32_t icssgNum = EnetSoc_getEnetNum_Icssg();
+
+    return (idx < icssgNum) ? EnetSoc_getEnetHandleByIdx_Icssg(idx) :
+                              EnetSoc_getEnetHandleByIdx_Cpsw(idx - icssgNum);
+}
+
+Enet_Handle EnetSoc_getEnetHandle(Enet_Type enetType,
+                                  uint32_t instId)
+{
+    return Enet_isCpswFamily(enetType) ? EnetSoc_getEnetHandle_Cpsw(enetType, instId) :
+                                         EnetSoc_getEnetHandle_Icssg(enetType, instId);
+}
+
+uint32_t EnetSoc_getEnetNum(void)
+{
+    return EnetSoc_getEnetNum_Icssg() + EnetSoc_getEnetNum_Cpsw();
+}
+
+uint32_t EnetSoc_getMacPortMax(Enet_Type enetType,
+                               uint32_t instId)
+{
+    return Enet_isCpswFamily(enetType) ? EnetSoc_getMacPortMax_Cpsw(enetType, instId) :
+                                         EnetSoc_getMacPortMax_Icssg(enetType, instId);
+}
+
+uint32_t EnetSoc_isIpSupported(Enet_Type enetType,
+                               uint32_t instId)
+{
+    return Enet_isCpswFamily(enetType) ? EnetSoc_isIpSupported_Cpsw(enetType, instId) :
+                                         EnetSoc_isIpSupported_Icssg(enetType, instId);
+}
+
+uint32_t EnetSoc_getCoreId(void)
+{
+    return EnetSoc_getCoreId_Icssg();
+}
+
+uint32_t EnetSoc_getClkFreq(Enet_Type enetType,
+                            uint32_t instId,
+                            uint32_t clkId)
+{
+    return Enet_isCpswFamily(enetType) ? EnetSoc_getClkFreq_Cpsw(enetType, instId, clkId) :
+                                         EnetSoc_getClkFreq_Icssg(enetType, instId, clkId);
+}
+
+uint32_t EnetSoc_getIntrTriggerType(Enet_Type enetType,
+                                    uint32_t instId,
+                                    uint32_t intrId)
+{
+    return Enet_isCpswFamily(enetType) ? EnetSoc_getIntrTriggerType_Cpsw(enetType, instId, intrId) :
+                                         EnetSoc_getIntrTriggerType_Icssg(enetType, instId, intrId);
+}
+
+int32_t EnetSoc_getEFusedMacAddrs(uint8_t macAddr[][ENET_MAC_ADDR_LEN],
+                                  uint32_t *num)
+{
+    return EnetSoc_getEFusedMacAddrs_Icssg(macAddr, num);
+}
+
+uint32_t EnetSoc_getMacPortCaps(Enet_Type enetType,
+                                uint32_t instId,
+                                Enet_MacPort macPort)
+{
+    return Enet_isCpswFamily(enetType) ? EnetSoc_getMacPortCaps_Cpsw(enetType, instId, macPort) :
+                                         EnetSoc_getMacPortCaps_Icssg(enetType, instId, macPort);
+}
+
+int32_t EnetSoc_getMacPortMii(Enet_Type enetType,
+                              uint32_t instId,
+                              Enet_MacPort macPort,
+                              EnetMacPort_Interface *mii)
+{
+    return Enet_isCpswFamily(enetType) ? EnetSoc_getMacPortMii_Cpsw(enetType, instId, macPort, mii) :
+                                         EnetSoc_getMacPortMii_Icssg(enetType, instId, macPort, mii);
+}
+
+int32_t EnetSoc_validateQsgmiiCfg(Enet_Type enetType,
+                                  uint32_t instId)
+{
+    return Enet_isCpswFamily(enetType) ? EnetSoc_validateQsgmiiCfg_Cpsw(enetType, instId) :
+                                         EnetSoc_validateQsgmiiCfg_Icssg(enetType, instId);
+}
+
+int32_t EnetSoc_mapPort2QsgmiiId(Enet_Type enetType,
+                                 uint32_t instId,
+                                 Enet_MacPort portNum,
+                                 uint32_t *qsgmiiId)
+{
+    return Enet_isCpswFamily(enetType) ? EnetSoc_mapPort2QsgmiiId_Cpsw(enetType, instId, portNum, qsgmiiId) :
+                                         EnetSoc_mapPort2QsgmiiId_Icssg(enetType, instId, portNum, qsgmiiId);
+}
+
+uint32_t EnetSoc_getRxFlowCount(Enet_Type enetType,
+                                uint32_t instId)
+{
+    return Enet_isCpswFamily(enetType) ? EnetSoc_getRxFlowCount_Cpsw(enetType, instId) :
+                                         EnetSoc_getRxFlowCount_Icssg(enetType, instId);
+}
+
+uint32_t EnetSoc_getHwPushCount(Enet_Type enetType,
+                                uint32_t instId)
+{
+    return Enet_isCpswFamily(enetType) ? EnetSoc_getHwPushCount_Cpsw(enetType, instId) :
+                                         EnetSoc_getHwPushCount_Icssg(enetType, instId);
+}
+
+uint32_t EnetSoc_getTxChPeerId(Enet_Type enetType,
+                               uint32_t instId,
+                               uint32_t chNum)
+{
+    return Enet_isCpswFamily(enetType) ? EnetSoc_getTxChPeerId_Cpsw(enetType, instId, chNum) :
+                                         EnetSoc_getTxChPeerId_Icssg(enetType, instId, chNum);
+}
+
+uint32_t EnetSoc_getRxChPeerId(Enet_Type enetType,
+                               uint32_t instId,
+                               uint32_t chIdx)
+{
+    return Enet_isCpswFamily(enetType) ? EnetSoc_getRxChPeerId_Cpsw(enetType, instId, chIdx) :
+                                         EnetSoc_getRxChPeerId_Icssg(enetType, instId, chIdx);
+}
+
+uint32_t EnetSoc_getTxChCount(Enet_Type enetType,
+                              uint32_t instId)
+{
+    return Enet_isCpswFamily(enetType) ? EnetSoc_getTxChCount_Cpsw(enetType, instId) :
+                                         EnetSoc_getTxChCount_Icssg(enetType, instId);
+}
+
+const EnetRm_IoctlPermissionTable *EnetAppRm_getIoctlPermissionInfo(Enet_Type enetType)
+{
+    return Enet_isCpswFamily(enetType) ? EnetAppRm_getIoctlPermissionInfo_Cpsw(enetType) :
+                                         EnetAppRm_getIoctlPermissionInfo_Icssg(enetType);
+}
+
+int32_t EnetAppSoc_fillMacAddrList(uint8_t macAddr[][ENET_MAC_ADDR_LEN],
+                                   uint32_t maxMacEntries,
+                                   uint32_t *pAvailMacEntries)
+{
+    return EnetAppSoc_fillMacAddrList_Icssg(macAddr, maxMacEntries, pAvailMacEntries);
+}
+
+/* ------------------- Driver open / close (ti_enet_open_close.h) ----------- */
+
+void EnetApp_driverInit(void)
+{
+    /* Enet_init() and EnetMem_init() are common to both peripherals */
+    EnetApp_driverInit_Icssg();
+}
+
+void EnetApp_driverDeInit(void)
+{
+    EnetApp_driverDeInit_Icssg();
+}
+
+int32_t EnetApp_driverOpen(Enet_Type enetType, uint32_t instId)
+{
+    return Enet_isCpswFamily(enetType) ? EnetApp_driverOpen_Cpsw(enetType, instId) :
+                                         EnetApp_driverOpen_Icssg(enetType, instId);
+}
+
+% let mcmEnable = combo.getModuleInstances(combo.icssModuleName)[0].McmEnable;
+% if (mcmEnable == false) {
+void EnetApp_driverClose(Enet_Type enetType, uint32_t instId)
+{
+    if (Enet_isCpswFamily(enetType))
+    {
+        EnetApp_driverClose_Cpsw(enetType, instId);
+    }
+    else
+    {
+        EnetApp_driverClose_Icssg(enetType, instId);
+    }
+}
+% }
+
+/* ---------------------- Application utils (enet_apputils.h) -------------- */
+
+void EnetApp_getEnetInstInfo(uint32_t enetInstanceId,
+                             Enet_Type *enetType,
+                             uint32_t *instId)
+{
+    if (enetInstanceId < ENETAPP_COMBO_ICSSG_INST_NUM)
+    {
+        EnetApp_getEnetInstInfo_Icssg(enetInstanceId, enetType, instId);
+    }
+    else
+    {
+        EnetApp_getEnetInstInfo_Cpsw(enetInstanceId - ENETAPP_COMBO_ICSSG_INST_NUM, enetType, instId);
+    }
+}
+
+void EnetApp_getEnetInstMacInfo(Enet_Type enetType,
+                                uint32_t instId,
+                                Enet_MacPort macPortList[],
+                                uint8_t *numMacPorts)
+{
+    if (Enet_isCpswFamily(enetType))
+    {
+        EnetApp_getEnetInstMacInfo_Cpsw(enetType, instId, macPortList, numMacPorts);
+    }
+    else
+    {
+        EnetApp_getEnetInstMacInfo_Icssg(enetType, instId, macPortList, numMacPorts);
+    }
+}
+
+void EnetApp_acquireHandleInfo(Enet_Type enetType,
+                               uint32_t instId,
+                               EnetApp_HandleInfo *handleInfo)
+{
+    if (Enet_isCpswFamily(enetType))
+    {
+        EnetApp_acquireHandleInfo_Cpsw(enetType, instId, handleInfo);
+    }
+    else
+    {
+        EnetApp_acquireHandleInfo_Icssg(enetType, instId, handleInfo);
+    }
+}
+
+void EnetApp_releaseHandleInfo(Enet_Type enetType,
+                               uint32_t instId)
+{
+    if (Enet_isCpswFamily(enetType))
+    {
+        EnetApp_releaseHandleInfo_Cpsw(enetType, instId);
+    }
+    else
+    {
+        EnetApp_releaseHandleInfo_Icssg(enetType, instId);
+    }
+}
+
+void EnetApp_coreAttach(Enet_Type enetType,
+                        uint32_t instId,
+                        uint32_t coreId,
+                        EnetPer_AttachCoreOutArgs *attachInfo)
+{
+    if (Enet_isCpswFamily(enetType))
+    {
+        EnetApp_coreAttach_Cpsw(enetType, instId, coreId, attachInfo);
+    }
+    else
+    {
+        EnetApp_coreAttach_Icssg(enetType, instId, coreId, attachInfo);
+    }
+}
+
+void EnetApp_coreDetach(Enet_Type enetType,
+                        uint32_t instId,
+                        uint32_t coreId,
+                        uint32_t coreKey)
+{
+    if (Enet_isCpswFamily(enetType))
+    {
+        EnetApp_coreDetach_Cpsw(enetType, instId, coreId, coreKey);
+    }
+    else
+    {
+        EnetApp_coreDetach_Icssg(enetType, instId, coreId, coreKey);
+    }
+}
+
+bool EnetApp_isPortLinked(Enet_Handle hEnet)
+{
+    return EnetAppCombo_isIcssgHandle(hEnet) ? EnetApp_isPortLinked_Icssg(hEnet) :
+                                               EnetApp_isPortLinked_Cpsw(hEnet);
+}
+
+void EnetApp_getTxDmaHandle(uint32_t enetTxDmaChId,
+                            const EnetApp_GetDmaHandleInArgs *inArgs,
+                            EnetApp_GetTxDmaHandleOutArgs *outArgs)
+{
+    if (enetTxDmaChId < ENETAPP_COMBO_ICSSG_TX_CH_NUM)
+    {
+        EnetApp_getTxDmaHandle_Icssg(enetTxDmaChId, inArgs, outArgs);
+    }
+    else
+    {
+        EnetApp_getTxDmaHandle_Cpsw(enetTxDmaChId - ENETAPP_COMBO_ICSSG_TX_CH_NUM, inArgs, outArgs);
+    }
+}
+
+void EnetApp_getRxDmaHandle(uint32_t enetRxDmaChId,
+                            const EnetApp_GetDmaHandleInArgs *inArgs,
+                            EnetApp_GetRxDmaHandleOutArgs *outArgs)
+{
+    if (enetRxDmaChId < ENETAPP_COMBO_ICSSG_RX_CH_NUM)
+    {
+        EnetApp_getRxDmaHandle_Icssg(enetRxDmaChId, inArgs, outArgs);
+    }
+    else
+    {
+        EnetApp_getRxDmaHandle_Cpsw(enetRxDmaChId - ENETAPP_COMBO_ICSSG_RX_CH_NUM, inArgs, outArgs);
+    }
+}
+
+void EnetApp_closeTxDma(uint32_t enetTxDmaChId,
+                        Enet_Handle hEnet,
+                        uint32_t coreKey,
+                        uint32_t coreId,
+                        EnetDma_PktQ *fqPktInfoQ,
+                        EnetDma_PktQ *cqPktInfoQ)
+{
+    if (enetTxDmaChId < ENETAPP_COMBO_ICSSG_TX_CH_NUM)
+    {
+        EnetApp_closeTxDma_Icssg(enetTxDmaChId, hEnet, coreKey, coreId, fqPktInfoQ, cqPktInfoQ);
+    }
+    else
+    {
+        EnetApp_closeTxDma_Cpsw(enetTxDmaChId - ENETAPP_COMBO_ICSSG_TX_CH_NUM,
+                                hEnet, coreKey, coreId, fqPktInfoQ, cqPktInfoQ);
+    }
+}
+
+void EnetApp_closeRxDma(uint32_t enetRxDmaChId,
+                        Enet_Handle hEnet,
+                        uint32_t coreKey,
+                        uint32_t coreId,
+                        EnetDma_PktQ *fqPktInfoQ,
+                        EnetDma_PktQ *cqPktInfoQ)
+{
+    if (enetRxDmaChId < ENETAPP_COMBO_ICSSG_RX_CH_NUM)
+    {
+        EnetApp_closeRxDma_Icssg(enetRxDmaChId, hEnet, coreKey, coreId, fqPktInfoQ, cqPktInfoQ);
+    }
+    else
+    {
+        EnetApp_closeRxDma_Cpsw(enetRxDmaChId - ENETAPP_COMBO_ICSSG_RX_CH_NUM,
+                                hEnet, coreKey, coreId, fqPktInfoQ, cqPktInfoQ);
+    }
+}
+
+void EnetApp_getMacAddress(uint32_t enetRxDmaChId,
+                           EnetApp_GetMacAddrOutArgs *outArgs)
+{
+    if (enetRxDmaChId < ENETAPP_COMBO_ICSSG_RX_CH_NUM)
+    {
+        EnetApp_getMacAddress_Icssg(enetRxDmaChId, outArgs);
+    }
+    else
+    {
+        EnetApp_getMacAddress_Cpsw(enetRxDmaChId - ENETAPP_COMBO_ICSSG_RX_CH_NUM, outArgs);
+    }
+}
+
+int32_t EnetApp_applyClassifier(Enet_Handle hEnet,
+                                uint32_t coreId,
+                                uint8_t *dstMacAddr,
+                                uint32_t vlanId,
+                                uint32_t ethType,
+                                uint32_t rxFlowIdx)
+{
+    return EnetAppCombo_isIcssgHandle(hEnet) ?
+           EnetApp_applyClassifier_Icssg(hEnet, coreId, dstMacAddr, vlanId, ethType, rxFlowIdx) :
+           EnetApp_applyClassifier_Cpsw(hEnet, coreId, dstMacAddr, vlanId, ethType, rxFlowIdx);
+}
+
+int32_t EnetApp_filterPriorityPacketsCfg(Enet_Handle hEnet,
+                                         uint32_t coreId)
+{
+    return EnetAppCombo_isIcssgHandle(hEnet) ? EnetApp_filterPriorityPacketsCfg_Icssg(hEnet, coreId) :
+                                               EnetApp_filterPriorityPacketsCfg_Cpsw(hEnet, coreId);
+}
+
+int32_t EnetApp_getRxTimeStamp(Enet_Handle hEnet,
+                               uint32_t coreId,
+                               EnetTimeSync_GetEthTimestampInArgs *inArgs,
+                               uint64_t *ts)
+{
+    return EnetAppCombo_isIcssgHandle(hEnet) ? EnetApp_getRxTimeStamp_Icssg(hEnet, coreId, inArgs, ts) :
+                                               EnetApp_getRxTimeStamp_Cpsw(hEnet, coreId, inArgs, ts);
+}
+
+int32_t EnetApp_setTimeStampComplete(Enet_Handle hEnet,
+                                     uint32_t coreId)
+{
+    return EnetAppCombo_isIcssgHandle(hEnet) ? EnetApp_setTimeStampComplete_Icssg(hEnet, coreId) :
+                                               EnetApp_setTimeStampComplete_Cpsw(hEnet, coreId);
+}
+
+/* Both peripherals use the same UDMA instance */
+Udma_DrvHandle EnetApp_getUdmaInstanceHandle(void)
+{
+    return EnetApp_getUdmaInstanceHandle_Icssg();
+}
+
+void EnetAppUtils_setCommonRxFlowPrms(EnetUdma_OpenRxFlowPrms *pRxFlowPrms)
+{
+    EnetAppUtils_setCommonRxFlowPrms_Icssg(pRxFlowPrms);
+}
+
+void EnetAppUtils_setCommonTxChPrms(EnetUdma_OpenTxChPrms *pTxChPrms)
+{
+    EnetAppUtils_setCommonTxChPrms_Icssg(pTxChPrms);
+}

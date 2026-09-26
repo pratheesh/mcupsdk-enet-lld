@@ -1,0 +1,66 @@
+%%{
+    /* CPSW + ICSSG on one core: one PHY driver table for the Enet LLD and the
+     * board API dispatched to the peripheral that owns the port. */
+    let ethphyScript = system.getScript("/board/ethphy_cpsw_icssg/ethphy_cpsw_icssg");
+    let common = system.getScript("/common");
+    let module = system.modules["/board/ethphy_cpsw_icssg/ethphy_cpsw_icssg"];
+    let uniqueDevices = ethphyScript.getUniqueLinkedEthphy(module);
+%%}
+
+/* ========================================================================== */
+/*          CPSW + ICSSG on one core: board API for both peripherals          */
+/* ========================================================================== */
+
+% for (let phyDevice of uniqueDevices) {
+extern Phy_DrvObj_t gEnetPhyDrv`common.camelSentence(phyDevice)`;
+% }
+extern Phy_DrvObj_t gEnetPhyDrvGeneric;
+
+/*! \brief PHY drivers of the ETHPHYs linked to CPSW and ICSSG. */
+static const EthPhyDrv_If gEnetPhyDrvs[] =
+{
+% for (let phyDevice of uniqueDevices) {
+    &gEnetPhyDrv`common.camelSentence(phyDevice)`,    /* `phyDevice` */
+% }
+    &gEnetPhyDrvGeneric,    /* Generic PHY - must be last */
+};
+
+const EnetPhy_DrvInfoTbl gEnetPhyDrvTbl =
+{
+    .numHandles = ENET_ARRAYSIZE(gEnetPhyDrvs),
+    .hPhyDrvList = gEnetPhyDrvs,
+};
+
+const EnetBoard_PhyCfg *EnetBoard_getPhyCfg_Icssg(const EnetBoard_EthPort *ethPort);
+const EnetBoard_PhyCfg *EnetBoard_getPhyCfg_Cpsw(const EnetBoard_EthPort *ethPort);
+int32_t EnetBoard_setupPorts_Icssg(EnetBoard_EthPort *ethPorts, uint32_t numEthPorts);
+int32_t EnetBoard_setupPorts_Cpsw(EnetBoard_EthPort *ethPorts, uint32_t numEthPorts);
+void EnetBoard_getMacAddrList_Icssg(uint8_t macAddr[][ENET_MAC_ADDR_LEN], uint32_t maxMacEntries, uint32_t *pAvailMacEntries);
+
+const EnetBoard_PhyCfg *EnetBoard_getPhyCfg(const EnetBoard_EthPort *ethPort)
+{
+    return Enet_isCpswFamily(ethPort->enetType) ? EnetBoard_getPhyCfg_Cpsw(ethPort) :
+                                                  EnetBoard_getPhyCfg_Icssg(ethPort);
+}
+
+int32_t EnetBoard_setupPorts(EnetBoard_EthPort *ethPorts,
+                             uint32_t numEthPorts)
+{
+    int32_t status = ENET_SOK;
+    uint32_t i;
+
+    for (i = 0U; (i < numEthPorts) && (status == ENET_SOK); i++)
+    {
+        status = Enet_isCpswFamily(ethPorts[i].enetType) ? EnetBoard_setupPorts_Cpsw(&ethPorts[i], 1U) :
+                                                           EnetBoard_setupPorts_Icssg(&ethPorts[i], 1U);
+    }
+
+    return status;
+}
+
+void EnetBoard_getMacAddrList(uint8_t macAddr[][ENET_MAC_ADDR_LEN],
+                              uint32_t maxMacEntries,
+                              uint32_t *pAvailMacEntries)
+{
+    EnetBoard_getMacAddrList_Icssg(macAddr, maxMacEntries, pAvailMacEntries);
+}
