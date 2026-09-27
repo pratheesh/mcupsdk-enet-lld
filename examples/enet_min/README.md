@@ -13,6 +13,8 @@ management through the TISCI firmware), CacheP/ClockP, Pinmux and DebugP.
 | `cpsw_min_example.c` | CPSW port 1 echo + 1 s broadcast test frame |
 | `icssg_min_example.c` | ICSSG1 port 1 echo + 1 s broadcast test frame |
 | `{cpsw,icssg}/am243x-evm/r5fss0-0_nortos` | Projects (hello_world SysConfig: UART log, MPU, clocks only) |
+| `min_log.c/.h` | Polled UART0 console with an integer-only formatter; replaces the DPL log backend |
+| `{cpsw,icssg}_lean/am243x-evm/r5fss0-0_nortos` | Same examples without the SysConfig UART/CCS log, printf or stdio; 1 KB heap, 4 KB stack |
 
 ## Design
 
@@ -35,11 +37,21 @@ management through the TISCI firmware), CacheP/ClockP, Pinmux and DebugP.
   ICSSG takes one object per slice (ICSSG0 = one more row in the SoC
   resource table in `icssg_min.c`).
 
+## Lean variants
+
+The `*_lean` projects drop the SysConfig UART console (which links the
+UART driver, UDMA and Sciclient IRQ routing even with DMA off) and the
+SDK printf. `min_log.c` defines `_DebugP_logZone`/`_DebugP_log`, so
+`DebugP_log()` and library asserts print through a polled UART0 at
+115200 8N1 using a ~0.5 KB integer-only formatter (%c %s %d %u %x %p).
+
 ## Build
 
 ```
 gmake -C cpsw/am243x-evm/r5fss0-0_nortos/ti-arm-clang all
 gmake -C icssg/am243x-evm/r5fss0-0_nortos/ti-arm-clang all
+gmake -C cpsw_lean/am243x-evm/r5fss0-0_nortos/ti-arm-clang all
+gmake -C icssg_lean/am243x-evm/r5fss0-0_nortos/ti-arm-clang all
 ```
 
 The makefiles expect this repo at `source/networking/enet/core` inside the
