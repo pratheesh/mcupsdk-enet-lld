@@ -15,6 +15,7 @@ management through the TISCI firmware), CacheP/ClockP, Pinmux and DebugP.
 | `{cpsw,icssg}/am243x-evm/r5fss0-0_nortos` | Projects (hello_world SysConfig: UART log, MPU, clocks only) |
 | `min_log.c/.h` | Polled UART0 console with an integer-only formatter; replaces the DPL log backend |
 | `{cpsw,icssg}_lean/am243x-evm/r5fss0-0_nortos` | Same examples without the SysConfig UART/CCS log, printf or stdio; 1 KB heap, 4 KB stack |
+| `hello_lean.c`, `hello_lean/am243x-evm/r5fss0-0_nortos` | nortos hello_world on `min_log.c` (no UART driver, printf or stdio): the SDK floor the lean examples build on |
 
 ## Design
 
@@ -52,6 +53,7 @@ gmake -C cpsw/am243x-evm/r5fss0-0_nortos/ti-arm-clang all
 gmake -C icssg/am243x-evm/r5fss0-0_nortos/ti-arm-clang all
 gmake -C cpsw_lean/am243x-evm/r5fss0-0_nortos/ti-arm-clang all
 gmake -C icssg_lean/am243x-evm/r5fss0-0_nortos/ti-arm-clang all
+gmake -C hello_lean/am243x-evm/r5fss0-0_nortos/ti-arm-clang all
 ```
 
 The makefiles expect this repo at `source/networking/enet/core` inside the
