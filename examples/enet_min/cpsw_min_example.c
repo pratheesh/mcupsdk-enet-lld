@@ -45,6 +45,8 @@
 #include <drivers/pinmux.h>
 #if defined(ENET_MIN_BOARD_AM243X_LP)
 #include <drivers/gpio.h>
+#include <drivers/soc.h>
+#include <drivers/i2c/v0/lld/i2c_lld.h>
 #include <drivers/hw_include/cslr_soc.h>
 #endif
 #include "cpsw_min.h"
@@ -59,19 +61,16 @@
 
 /* RGMII1 + MDIO (values from the Enet SysConfig output). The RGMII1 pins
  * are the same on both boards; the LP routes MDIO0 to the PRG1_MDIO0 pins,
- * which it shares with PRU_ICSSG1, and has a PHY reset and an RGMII1 mux
- * select on GPIO0_26/27 (GPMC0_AD11/12). */
+ * which it shares with PRU_ICSSG1, and has an external RGMII1 mux (CPSW or
+ * PRG1). Its select and the PHY reset depend on the LP revision (SPRUJ12F
+ * Table A-2): GPIO0_27 and GPIO0_26 (GPMC0_AD12/11) from E3 on, GPIO0_70
+ * (ball AA11) on E1/E2, where GPIO0_26/27 drive the user LEDs. */
 #define RGMII_IN            (PIN_MODE(4) | PIN_INPUT_ENABLE | PIN_PULL_DISABLE)
 #if defined(ENET_MIN_BOARD_AM243X_LP)
 #define PHY_ADDR            (3U)
-#if defined(CPSW_MIN_LP_REV_E2)
-/* E1/E2 boards: the mux select is GPIO0_70 (ball AA11), as in the SDK's
- * generated LP board config; GPIO0_26/27 drive the user LEDs there. */
-#define GPIO_MUX_SEL        (70U)
-#else
-#define GPIO_PHY_RST        (26U)
-#define GPIO_MUX_SEL        (27U)
-#endif
+#define LP_E3_PHY_RST       (26U)
+#define LP_E3_MUX_SEL       (27U)
+#define LP_E2_MUX_SEL       (70U)
 #ifndef CPSW_MIN_LP_MUX_LEVEL
 #define CPSW_MIN_LP_MUX_LEVEL   (1)
 #endif
@@ -81,12 +80,6 @@
 static const Pinmux_PerCfg_t gCpswPins[] =
 {
 #if defined(ENET_MIN_BOARD_AM243X_LP)
-#if defined(CPSW_MIN_LP_REV_E2)
-    { PIN_PRG1_PRU1_GPO5,  PIN_MODE(7) | PIN_INPUT_ENABLE | PIN_PULL_DISABLE },    /* MUX SEL */
-#else
-    { PIN_GPMC0_AD11,      PIN_MODE(7) | PIN_INPUT_ENABLE | PIN_PULL_DIRECTION },  /* PHY RST */
-    { PIN_GPMC0_AD12,      PIN_MODE(7) | PIN_INPUT_ENABLE | PIN_PULL_DIRECTION },  /* MUX SEL */
-#endif
     { PIN_PRG1_MDIO0_MDC,  PIN_MODE(4) | PIN_PULL_DISABLE },     /* MDC   */
     { PIN_PRG1_MDIO0_MDIO, RGMII_IN },                           /* MDIO  */
 #else
@@ -107,6 +100,80 @@ static const Pinmux_PerCfg_t gCpswPins[] =
     { PIN_PRG1_PRU0_GPO9,  RGMII_IN },                           /* TX_CTL*/
     { PINMUX_END, 0U }
 };
+
+#if defined(ENET_MIN_BOARD_AM243X_LP)
+static const Pinmux_PerCfg_t gLpE3Pins[] =
+{
+    { PIN_GPMC0_AD11,      PIN_MODE(7) | PIN_INPUT_ENABLE | PIN_PULL_DIRECTION },  /* PHY RST */
+    { PIN_GPMC0_AD12,      PIN_MODE(7) | PIN_INPUT_ENABLE | PIN_PULL_DIRECTION },  /* MUX SEL */
+    { PINMUX_END, 0U }
+};
+static const Pinmux_PerCfg_t gLpE2Pins[] =
+{
+    { PIN_PRG1_PRU1_GPO5,  PIN_MODE(7) | PIN_INPUT_ENABLE | PIN_PULL_DISABLE },    /* MUX SEL */
+    { PINMUX_END, 0U }
+};
+static const Pinmux_PerCfg_t gLpI2cPins[] =
+{
+    { PIN_I2C0_SCL,        PIN_MODE(0) | PIN_INPUT_ENABLE | PIN_PULL_DISABLE },
+    { PIN_I2C0_SDA,        PIN_MODE(0) | PIN_INPUT_ENABLE | PIN_PULL_DISABLE },
+    { PINMUX_END, 0U }
+};
+
+/* LP revision from the board ID EEPROM (I2C0 0x50, offset 0x1A, two
+ * characters such as "E1"): 1 for E1/E2, 0 for later revisions, -1 if it
+ * cannot be read. */
+static int32_t lpIsRevE1E2(uint8_t rev[2])
+{
+    I2CLLD_Object i2c;
+    I2C_Memory_ExtendedParams p;
+    int32_t ret = -1;
+
+    Pinmux_config(gLpI2cPins, PINMUX_DOMAIN_ID_MAIN);
+    if (SOC_moduleClockEnable(TISCI_DEV_I2C0, 1U) != SystemP_SUCCESS)
+    {
+        return -1;
+    }
+    memset(&i2c, 0, sizeof(i2c));
+    i2c.baseAddr          = CSL_I2C0_CFG_BASE;
+    i2c.funcClk           = 96000000U;
+    i2c.bitRate           = I2C_100KHZ;
+    i2c.Clock_getTicks    = ClockP_getTicks;
+    i2c.Clock_usecToTicks = ClockP_usecToTicks;
+    i2c.Clock_uSleep      = ClockP_usleep;
+    if (I2C_lld_init(&i2c) == I2C_STS_SUCCESS)
+    {
+        memset(&p, 0, sizeof(p));
+        p.extendedParams.deviceAddress = 0x50U;
+        p.extendedParams.buffer        = rev;
+        p.extendedParams.size          = 2U;
+        p.memAddr                      = 0x1AU;
+        p.memAddrSize                  = 2U;
+        if (I2C_lld_mem_read(&i2c, &p, 100000U) == I2C_STS_SUCCESS)
+        {
+            ret = ((rev[0] == (uint8_t)'E') &&
+                   ((rev[1] == (uint8_t)'1') || (rev[1] == (uint8_t)'2'))) ? 1 : 0;
+        }
+        (void)I2C_lld_deInit(&i2c);
+    }
+    return ret;
+}
+
+/* Drive a GPIO0 pin to level, then make it an output, so the pin never
+ * glitches low on the way (a low pulse on the PHY reset re-latches straps). */
+static void lpGpioOut(uint32_t pin, uint32_t level)
+{
+    if (level != 0U)
+    {
+        GPIO_pinWriteHigh(CSL_GPIO0_BASE, pin);
+    }
+    else
+    {
+        GPIO_pinWriteLow(CSL_GPIO0_BASE, pin);
+    }
+    GPIO_setDirMode(CSL_GPIO0_BASE, pin, GPIO_DIRECTION_OUTPUT);
+}
+#endif
 
 static CpswMin_Obj gCpsw;
 
@@ -173,17 +240,36 @@ void cpsw_min_example_main(void *args)
 
     Pinmux_config(gCpswPins, PINMUX_DOMAIN_ID_MAIN);
 #if defined(ENET_MIN_BOARD_AM243X_LP)
-    /* PHY out of reset, RGMII1 jack to CPSW (as the Enet LP examples do) */
-#if defined(GPIO_PHY_RST)
-    GPIO_setDirMode(CSL_GPIO0_BASE, GPIO_PHY_RST, GPIO_DIRECTION_OUTPUT);
-    GPIO_pinWriteHigh(CSL_GPIO0_BASE, GPIO_PHY_RST);
-#endif
-    GPIO_setDirMode(CSL_GPIO0_BASE, GPIO_MUX_SEL, GPIO_DIRECTION_OUTPUT);
-#if (CPSW_MIN_LP_MUX_LEVEL != 0)
-    GPIO_pinWriteHigh(CSL_GPIO0_BASE, GPIO_MUX_SEL);
+    {
+        /* PHY out of reset, RGMII1 jack to CPSW, for this LP revision. If
+         * the EEPROM cannot be read, -DCPSW_MIN_LP_REV_E2 picks E1/E2. */
+        uint8_t rev[2] = { (uint8_t)'?', (uint8_t)'?' };
+        int32_t e1e2 = lpIsRevE1E2(rev);
+        uint32_t muxSel;
+
+        if (e1e2 < 0)
+        {
+#if defined(CPSW_MIN_LP_REV_E2)
+            e1e2 = 1;
 #else
-    GPIO_pinWriteLow(CSL_GPIO0_BASE, GPIO_MUX_SEL);
+            e1e2 = 0;
 #endif
+        }
+        if (e1e2 != 0)
+        {
+            Pinmux_config(gLpE2Pins, PINMUX_DOMAIN_ID_MAIN);
+            muxSel = LP_E2_MUX_SEL;
+        }
+        else
+        {
+            Pinmux_config(gLpE3Pins, PINMUX_DOMAIN_ID_MAIN);
+            lpGpioOut(LP_E3_PHY_RST, 1U);
+            muxSel = LP_E3_MUX_SEL;
+        }
+        lpGpioOut(muxSel, (CPSW_MIN_LP_MUX_LEVEL != 0) ? 1U : 0U);
+        DebugP_log("cpsw_min: LP-AM243 rev %c%c, RGMII1 mux select GPIO0_%u\r\n",
+                   (char)rev[0], (char)rev[1], muxSel);
+    }
 #endif
 
     if (CpswMin_open(&gCpsw, &gCpswCfg) != SystemP_SUCCESS)

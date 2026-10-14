@@ -23,7 +23,7 @@ management through the TISCI firmware), CacheP/ClockP, Pinmux and DebugP.
 |---|---|---|
 | CPSW port 1 | DP83867, MDIO address 0 | DP83869 on the RGMII1 jack, MDIO address 3 |
 | CPSW MDIO pins | PRG0_PRU1_GPO19/18 | PRG1_MDIO0_MDC/MDIO, shared with PRU_ICSSG1 |
-| CPSW extras | | E3 and later: GPIO0_26 PHY reset and GPIO0_27 RGMII1 mux select, both driven high. E1/E2 (`-DCPSW_MIN_LP_REV_E2`): GPIO0_70 mux select driven high, PHY reset (GPIO0_73) left alone |
+| CPSW extras | | E3 and later: GPIO0_26 PHY reset and GPIO0_27 RGMII1 mux select, both driven high. E1/E2: GPIO0_70 mux select driven high, PHY reset (GPIO0_73) left alone. The revision is read from the board ID EEPROM at start-up |
 | ICSSG1 port 1 | DP83869, MDIO address 15 | DP83869 on jack J18, MDIO address 15 |
 | ICSSG PHY delay | TX 0.75 ns, RX 2.0 ns | TX 0.5 ns, RX 0.5 ns (`IcssgMin_Cfg.phyDelay`) |
 
@@ -87,7 +87,7 @@ MCU+ SDK, like the other Enet examples.
 Tested on an LP-AM243 (revision E1) against an LP-AM261 running the SOEM
 `x` echo tester over CPSW, 100 Mb/s full duplex. Not yet tested on the EVM.
 
-| Image | ICSSG1 (J18) | CPSW (RGMII1, `-DCPSW_MIN_LP_REV_E2`) |
+| Image | ICSSG1 (J18) | CPSW (RGMII1) |
 |---|---|---|
 | lean | 12/12 pass; 60 B RTT 36 us avg; 1514 B 98.2 Mb/s | 12/12 pass; zero-copy echo: 60 B RTT 33.2 us avg (p99 34), 1514 B RTT 316.5 us, 98.2 Mb/s |
 | standard | 7/12 before the log fix below; not yet retested | 12/12 pass after the log fix |
@@ -108,9 +108,10 @@ same bench: 60 B RTT 43.1 us; it drops 1514 B frames.
 Board notes:
 * LP-AM243 E1/E2 select the RGMII1 mux with GPIO0_70. The SDK LP examples
   drive GPIO0_27 (the E3 pin, a user LED on E1/E2), so on those boards
-  the PHY links but no CPSW frame reaches it. Build with
-  `-DCPSW_MIN_LP_REV_E2`. The revision is in the board ID EEPROM (I2C0
-  0x50, offset 0x1A).
+  the PHY links but no CPSW frame reaches it. The CPSW example reads the
+  revision from the board ID EEPROM (I2C0 0x50, offset 0x1A, e.g. "E1")
+  at start-up and picks the pins; `-DCPSW_MIN_LP_REV_E2` only selects
+  E1/E2 when the EEPROM cannot be read.
 * On E1/E2, do not pulse the PHY reset (GPIO0_73) with the SoC pads
   attached: the DP83869 re-samples its straps and can come back
   advertising 1000 Mb/s only.
