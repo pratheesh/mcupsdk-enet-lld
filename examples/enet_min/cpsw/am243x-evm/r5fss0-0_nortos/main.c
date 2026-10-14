@@ -33,6 +33,8 @@
 #include <stdlib.h>
 #include "ti_drivers_config.h"
 #include "ti_board_config.h"
+#include "ti_drivers_open_close.h"
+#include "ti_board_open_close.h"
 
 void cpsw_min_example_main(void *args);
 
@@ -40,9 +42,13 @@ int main(void)
 {
     System_init();
     Board_init();
+    Drivers_open();             /* opens the UART behind DebugP_log */
+    (void)Board_driversOpen();
 
     cpsw_min_example_main(NULL);
 
+    Board_driversClose();
+    Drivers_close();
     Board_deinit();
     System_deinit();
 

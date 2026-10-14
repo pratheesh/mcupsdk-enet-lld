@@ -312,6 +312,16 @@ static int32_t flowInit(uint32_t flow, uint32_t ring)
 static int32_t psilPair(uint32_t src, uint32_t dst)
 {
     struct tisci_msg_rm_psil_pair_req req;
+    struct tisci_msg_rm_psil_unpair_req unpair;
+
+    /* A pairing outlives the program that made it (a reload from the
+     * debugger keeps the system firmware running), and pairing twice fails:
+     * drop any old pairing first. */
+    memset(&unpair, 0, sizeof(unpair));
+    unpair.nav_id     = NAV_PSIL;
+    unpair.src_thread = src;
+    unpair.dst_thread = dst;
+    (void)Sciclient_rmPsilUnpair(&unpair, SystemP_WAIT_FOREVER);
 
     memset(&req, 0, sizeof(req));
     req.nav_id     = NAV_PSIL;

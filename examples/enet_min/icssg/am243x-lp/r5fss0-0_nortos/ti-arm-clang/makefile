@@ -63,7 +63,7 @@ DEFINES_common := \
 	-DSOC_AM243X \
 	-DOS_NORTOS \
 	-DENET_MIN_BOARD_AM243X_LP \
-	-DICSSG_MIN_SLICES=1 \
+	-DICSSG_MIN_SLICES=2 \
 
 CFLAGS_common := \
 	-mcpu=cortex-r5 \
