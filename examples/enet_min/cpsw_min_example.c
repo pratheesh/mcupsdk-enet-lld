@@ -198,8 +198,9 @@ static void boardInit(void)
     t.readCount     = 1U;
     if (I2C_transfer(gI2cHandle[CONFIG_I2C0], &t) == SystemP_SUCCESS)
     {
-        DebugP_log("cpsw_min: U42 pins 0x%02x (CONN0_DET %u, RST0 %u, SEL1 %u)\r\n",
-                   in, in & 1U, (in >> 1) & 1U, (in >> 3) & 1U);
+        DebugP_log("cpsw_min: U42 pins 0x%02x (CONN0_DET %u, RST0 %u, SEL1 %u, SEL2 %u)\r\n",
+                   in, in & 1U, (in >> 1) & 1U, (in >> 3) & 1U,
+                   (in >> 4) & 1U);
     }
     else
     {
