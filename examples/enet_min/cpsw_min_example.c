@@ -317,12 +317,14 @@ static void echo(CpswMin_Obj *h, uint8_t *rx, uint32_t len, uint32_t port)
 #else
 /* Zero-copy echo: swap the MAC addresses in place and send the RX buffer
  * itself; the driver hands it back to RX once the frame is out. */
+static volatile uint32_t gEchoFail;     /* echoes dropped: no TX descriptor */
 static void echo(CpswMin_Obj *h, uint8_t *rx, uint32_t len, uint32_t port)
 {
     memcpy(rx, &rx[6], 6U);
     memcpy(&rx[6], gCpswCfg.macAddr, 6U);
     if (CpswMin_sendRx(h, rx, len, port) != SystemP_SUCCESS)
     {
+        gEchoFail++;
         CpswMin_recvDone(h, rx);
     }
 }
@@ -658,6 +660,28 @@ static void testerMain(void)
     }
     DebugP_log("cpsw_min: tester, link up, starting in 2 s\r\n");
     drainFor(ECHO_START_DELAY_US);
+
+    /* Link up does not mean the far end echoes yet: its PHY links while its
+     * SoC is still being loaded. Ping every 200 ms for up to 60 s first. */
+    {
+        EchoCounts c = { 0 };
+        uint32_t good, n;
+        int32_t seq = -1;
+
+        for (n = 0U; (n < 300U) && (seq < 0); n++)
+        {
+            uint64_t deadline = ClockP_getTimeUsec() + 200000U;
+
+            (void)sendFrame(0x7FFE0000U + n, 60U);
+            while ((ClockP_getTimeUsec() < deadline) && (seq < 0))
+            {
+                seq = recvEcho(&c, &good);
+            }
+        }
+        DebugP_log("cpsw_min: tester, far end %s after %u pings\r\n",
+                   (seq >= 0) ? "echoes" : "silent", (unsigned)n);
+        drainFor(ECHO_START_DELAY_US);
+    }
     DebugP_log("ECHO START cpu_mhz=%u mac=%02x:%02x:%02x:%02x:%02x:%02x\r\n", (unsigned)gCpuMhz,
                gCpswCfg.macAddr[0], gCpswCfg.macAddr[1], gCpswCfg.macAddr[2],
                gCpswCfg.macAddr[3], gCpswCfg.macAddr[4], gCpswCfg.macAddr[5]);
@@ -894,8 +918,8 @@ void cpsw_min_example_main(void *args)
         if ((now >= nextLog) && ((now - lastRx) >= 1000000U))
         {
 #if defined(SOC_AM261X)
-            DebugP_log("cpsw_min: tx %u rx %u rxErr %u dmaErr 0x%x\r\n",
-                       gCpsw.txPkts, gCpsw.rxPkts, gCpsw.rxErrs, gCpsw.dmaErr);
+            DebugP_log("cpsw_min: tx %u rx %u rxErr %u dmaErr 0x%x echoFail %u\r\n",
+                       gCpsw.txPkts, gCpsw.rxPkts, gCpsw.rxErrs, gCpsw.dmaErr, gEchoFail);
 #else
             DebugP_log("cpsw_min: tx %u rx %u rxErr %u\r\n",
                        gCpsw.txPkts, gCpsw.rxPkts, gCpsw.rxErrs);

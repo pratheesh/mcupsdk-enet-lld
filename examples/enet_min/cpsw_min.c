@@ -428,6 +428,11 @@ static void mdioWrite(uint32_t phy, uint32_t reg, uint16_t val)
 
 /* ---- PHY (TI DP83867 on the AM243x EVM, DP83869 on the AM243x LP) ------- */
 
+/* PHYCR TX FIFO depth: 0 = 3, 1 = 4, 2 = 6, 3 = 8 nibbles (Enet LLD default 4) */
+#ifndef CPSW_MIN_PHY_TX_FIFO
+#define CPSW_MIN_PHY_TX_FIFO    (1U)
+#endif
+
 #define PHY_BMCR                (0x00U)
 #define PHY_BMSR                (0x01U)
 #define PHY_PHYIDR2             (0x03U)
@@ -507,7 +512,7 @@ static void phyConfig(uint32_t phy)
         phyRmwExt(phy, DP_RGMIICTL, 0x0083U, 0x0083U);  /* RGMII + TX/RX clk shift */
         phyWriteExt(phy, DP_RGMIIDCTL, 0x0007U);        /* TX 0.25 ns, RX 2.0 ns */
     }
-    phyRmw(phy, PHY_PHYCR, 0xC000U, 0x4000U);           /* TX FIFO depth 4 */
+    phyRmw(phy, PHY_PHYCR, 0xC000U, CPSW_MIN_PHY_TX_FIFO << 14);  /* TX FIFO depth */
     phyRmwExt(phy, DP_IOMUXCFG, 0x001FU, 0x001FU);      /* 35 ohm output impedance */
     phyRmw(phy, PHY_BMCR, 0x1200U, 0x1200U);            /* autoneg enable+restart */
 }

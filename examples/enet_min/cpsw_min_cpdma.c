@@ -268,6 +268,7 @@ int32_t CpswMin_open(CpswMin_Obj *h, const CpswMin_Cfg *cfg)
         REG32(ALE_PORTCTL(0U)) = ALE_PORT_FORWARD;
         REG32(CPSW_P0_RX_MAXLEN) = CPSW_MIN_MTU;
         REG32(CPSW_CTRL) = CONTROL_P0_RX_PAD | CONTROL_P0_TX_CRC_REMOVE | CONTROL_P0_ENABLE;
+        REG32(CPSW_NU + 0x14U) = 0x7U;      /* STAT_PORT_EN: statistics on ports 0-2 */
 
         for (p = 0U; p < h->numPorts; p++)
         {
