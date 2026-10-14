@@ -38,8 +38,14 @@
 #include <kernel/dpl/HwiP.h>
 #include <kernel/dpl/SystemP.h>
 #include <drivers/pinmux.h>
-#include <drivers/sciclient.h>
 #include <drivers/hw_include/cslr_soc.h>
+#if defined(SOC_AM261X)
+#include <drivers/soc.h>
+#define MIN_LOG_UART_BASE       (CSL_UART0_U_BASE)
+#else
+#include <drivers/sciclient.h>
+#define MIN_LOG_UART_BASE       (CSL_UART0_BASE)
+#endif
 #include "min_log.h"
 
 #define REG32(a)        (*(volatile uint32_t *)(a))
@@ -58,19 +64,32 @@ static uint32_t gMinLogReady;
 
 static const Pinmux_PerCfg_t gMinLogPins[] =
 {
+#if defined(SOC_AM261X)
+    { PIN_GPIO27, PIN_MODE(0) | PIN_PULL_DISABLE | PIN_SLEW_RATE_LOW },    /* UART0_RXD */
+    { PIN_GPIO28, PIN_MODE(0) | PIN_PULL_DISABLE | PIN_SLEW_RATE_LOW },    /* UART0_TXD */
+#else
     { PIN_UART0_RXD, PIN_MODE(0) | PIN_INPUT_ENABLE },
     { PIN_UART0_TXD, PIN_MODE(0) },
+#endif
     { PINMUX_END, 0U }
 };
 
 void MinLog_init(void)
 {
-    const uintptr_t base = CSL_UART0_BASE;
+    const uintptr_t base = MIN_LOG_UART_BASE;
     const uint32_t  div  = (MIN_LOG_UART_CLK_HZ + (8U * MIN_LOG_BAUD)) / (16U * MIN_LOG_BAUD);
 
+#if defined(SOC_AM261X)
+    (void)SOC_moduleClockEnable(SOC_RcmPeripheralId_LIN0_UART0, 1U);
+    (void)SOC_moduleSetClockFrequency(SOC_RcmPeripheralId_LIN0_UART0,
+                                      SOC_RcmPeripheralClockSource_DPLL_PER_HSDIV0_CLKOUT2,
+                                      MIN_LOG_UART_CLK_HZ);
+    Pinmux_config(gMinLogPins, PINMUX_DOMAIN_ID_MAIN);
+#else
     (void)Sciclient_pmSetModuleState(TISCI_DEV_UART0, TISCI_MSG_VALUE_DEVICE_SW_STATE_ON,
                                      0U, SystemP_WAIT_FOREVER);
     Pinmux_config(gMinLogPins, PINMUX_DOMAIN_ID_MAIN);
+#endif
 
     REG32(base + UART_MDR1) = 0x7U;                 /* disable */
     REG32(base + UART_LCR)  = 0x80U;                /* divisor latch */
@@ -86,10 +105,10 @@ void MinLog_putc(char c)
 {
     if (gMinLogReady != 0U)
     {
-        while ((REG32(CSL_UART0_BASE + UART_LSR) & UART_LSR_THRE) == 0U)
+        while ((REG32(MIN_LOG_UART_BASE + UART_LSR) & UART_LSR_THRE) == 0U)
         {
         }
-        REG32(CSL_UART0_BASE + UART_THR) = (uint8_t)c;
+        REG32(MIN_LOG_UART_BASE + UART_THR) = (uint8_t)c;
     }
 }
 

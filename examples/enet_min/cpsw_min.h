@@ -31,9 +31,12 @@
  */
 
 /*
- * cpsw_min: minimal bare-metal CPSW3G (AM64x/AM243x) Ethernet driver.
+ * cpsw_min: minimal bare-metal CPSW3G (AM64x/AM243x, AM261x) Ethernet driver.
  *
  *  - One PKTDMA TX channel + one RX channel/flow, host descriptors, polled.
+ *    On the AM261x (SOC_AM261X, cpsw_min_cpdma.c) the DMA is the CPSW CPDMA
+ *    instead: one TX and one RX channel on linked CPPI 3.0 descriptors, and
+ *    the MAC port is a fixed 10/100 MII link (no MDIO, see fixedSpeed).
  *  - ALE in bypass mode; TX is directed to a MAC port through the
  *    descriptor dstTag, RX reports the ingress MAC port.
  *  - PHY bring-up (TI DP83867) over MDIO in manual (bit-bang) mode, which
@@ -63,7 +66,11 @@ extern "C" {
 #define CPSW_MIN_NUM_RX         (8U)    /* RX descriptors/buffers, power of 2 */
 #endif
 #define CPSW_MIN_BUF_SIZE       (1536U) /* bytes per packet buffer */
+#if defined(SOC_AM261X)
+#define CPSW_MIN_DESC_SIZE      (32U)   /* CPDMA descriptor, one cache line */
+#else
 #define CPSW_MIN_DESC_SIZE      (128U)  /* host descriptor size/alignment */
+#endif
 #define CPSW_MIN_MAX_PORTS      (2U)
 #define CPSW_MIN_MTU            (1522U) /* max frame incl. VLAN tag, no FCS */
 
@@ -72,10 +79,15 @@ extern "C" {
 #define CPSW_MIN_SPEED_100      (1U)
 #define CPSW_MIN_SPEED_1000     (2U)
 
+/* CpswMin_PortCfg.fixedSpeed: 0 = PHY over MDIO (AM64x/AM243x), else a fixed
+ * full-duplex link at that speed with MDIO untouched (AM261x). */
+#define CPSW_MIN_FIXED(speed)   ((uint8_t)((speed) + 1U))
+
 typedef struct
 {
     uint8_t  macPort;       /* 1 or 2 */
     uint8_t  phyAddr;       /* MDIO address of the PHY */
+    uint8_t  fixedSpeed;    /* 0 or CPSW_MIN_FIXED(CPSW_MIN_SPEED_x), AM261x only */
 } CpswMin_PortCfg;
 
 typedef struct
@@ -93,6 +105,47 @@ typedef struct
     uint8_t  speed;
     uint8_t  fullDuplex;
 } CpswMin_Port;
+
+#if defined(SOC_AM261X)
+
+/* CPDMA descriptor (CPPI 3.0): the first four words are the hardware view.
+ * Descriptors live in the uncached ENET_CPPI_DESC section (cpsw_min_cpdma.c),
+ * not in the driver object, because the hardware updates them in place. */
+typedef struct
+{
+    volatile uint32_t next;         /* next descriptor, 0 = end of queue */
+    volatile uint32_t bufPtr;
+    volatile uint32_t bufOffLen;    /* buffer offset (31:16), length (15:0) */
+    volatile uint32_t flags;        /* SOP/EOP/OWNER/EOQ, port, packet length */
+    uint8_t           pad[CPSW_MIN_DESC_SIZE - 16U];
+} CpswMin_Desc;
+
+/*
+ * Driver object. Keep it in normal (cached) OCRAM .bss; the packet buffers
+ * are embedded so one static object plus the descriptor section is
+ * everything the driver needs.
+ */
+typedef struct
+{
+    uint8_t       txBuf[CPSW_MIN_NUM_TX][CPSW_MIN_BUF_SIZE] __attribute__((aligned(128)));
+    uint8_t       rxBuf[CPSW_MIN_NUM_RX][CPSW_MIN_BUF_SIZE] __attribute__((aligned(128)));
+    uint8_t       txFree[CPSW_MIN_NUM_TX];  /* stack of free TX indices */
+    uint8_t       txQ[CPSW_MIN_NUM_TX];     /* TX descriptors in queue order */
+    uint8_t       rxQ[CPSW_MIN_NUM_RX];     /* RX descriptors in queue order */
+    uint32_t      txFreeCnt;
+    uint32_t      txRd;                     /* free-running queue counters */
+    uint32_t      txWr;
+    uint32_t      rxRd;
+    uint32_t      rxWr;
+    uint32_t      numPorts;
+    CpswMin_Port  port[CPSW_MIN_MAX_PORTS];
+    uint32_t      txPkts;
+    uint32_t      rxPkts;
+    uint32_t      rxErrs;
+    uint32_t      dmaErr;                   /* last nonzero CPDMA host error */
+} CpswMin_Obj;
+
+#else
 
 /* Host packet descriptor (CPPI5 HMPD + 16 B EPIB + 16 B PS words) */
 typedef struct
@@ -145,7 +198,10 @@ typedef struct
     uint32_t      rxErrs;
 } CpswMin_Obj;
 
-/* Power up CPSW, configure DMA/ALE/host port/MACs and start PHY autoneg. */
+#endif /* SOC_AM261X */
+
+/* Power up CPSW, configure DMA/ALE/host port/MACs and start PHY autoneg
+ * (AM261x: enable the fixed-link MAC ports). */
 int32_t  CpswMin_open(CpswMin_Obj *h, const CpswMin_Cfg *cfg);
 
 /* Poll PHYs; programs a MAC port on link change. Returns link-up bitmask
