@@ -758,7 +758,14 @@ static void fwConfig(IcssgMin_Obj *h, uint32_t flowBase)
         fwPdInit(base, pdCfg[s][q][0], pdCfg[s][q][1], pdCfg[s][q][2], pdCfg[s][q][3], pdCfg[s][q][4]);
     }
 
-    /* Firmware pools: scratch, one host pool, host egress queues */
+    /* Firmware pools: scratch, one host pool, host egress queues. The CPU
+     * never touches them again, but .bss zeroing at start-up can leave dirty
+     * lines in the D-cache; evicted later, they land on frame data the
+     * firmware wrote there (zeroed 32/64 B runs in echoed 1514 B frames).
+     * Write back and invalidate the whole region before the firmware owns it. */
+    CacheP_wbInv((void *)h->fwHostPool,
+                 (uint32_t)(((uintptr_t)h->fwScratch + ICSSG_MIN_SCRATCH_SIZE) - (uintptr_t)h->fwHostPool),
+                 CacheP_TYPE_ALLD);
     REG32(dram + FW_SCRATCH_ADDR) = (uint32_t)(uintptr_t)h->fwScratch;
     REG32(dram + FW_BUF_POOL0 + (FW_HOST_POOL_IDX * 8U)) = (uint32_t)(uintptr_t)h->fwHostPool;
     REG32(dram + FW_BUF_POOL0 + (FW_HOST_POOL_IDX * 8U) + 4U) = ICSSG_MIN_HOST_POOL_SIZE;
