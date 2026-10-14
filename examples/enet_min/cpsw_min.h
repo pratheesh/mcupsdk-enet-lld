@@ -63,7 +63,9 @@ extern "C" {
 #define CPSW_MIN_NUM_TX         (8U)    /* TX descriptors/buffers, power of 2 */
 #endif
 #ifndef CPSW_MIN_NUM_RX
-#define CPSW_MIN_NUM_RX         (8U)    /* RX descriptors/buffers, power of 2 */
+#define CPSW_MIN_NUM_RX         (16U)   /* RX descriptors/buffers, power of 2;
+                                           CpswMin_sendRx() lends RX buffers to
+                                           TX, so 8 overran at 60 B line rate */
 #endif
 #define CPSW_MIN_BUF_SIZE       (1536U) /* bytes per packet buffer */
 #if defined(SOC_AM261X)
@@ -190,6 +192,7 @@ typedef struct
     CpswMin_Ring  txRing;
     CpswMin_Ring  rxRing;
     uint8_t       txFree[CPSW_MIN_NUM_TX];  /* stack of free TX indices */
+    uint8_t       txRx[CPSW_MIN_NUM_TX];    /* RX index + 1 lent to a TX desc */
     uint32_t      txFreeCnt;
     uint32_t      numPorts;
     CpswMin_Port  port[CPSW_MIN_MAX_PORTS];
@@ -215,11 +218,18 @@ uint8_t *CpswMin_getTxBuf(CpswMin_Obj *h);
 int32_t  CpswMin_send(CpswMin_Obj *h, uint8_t *buf, uint32_t len, uint32_t macPort);
 
 /* Next received frame or NULL. Buffer stays owned by the caller until
- * CpswMin_recvDone(). *macPort is the ingress MAC port. */
+ * CpswMin_recvDone(). *macPort is the ingress MAC port. When no frame is
+ * pending it also reclaims completed TX descriptors. */
 uint8_t *CpswMin_recv(CpswMin_Obj *h, uint32_t *len, uint32_t *macPort);
 
 /* Return an RX buffer to hardware (any order). */
 void     CpswMin_recvDone(CpswMin_Obj *h, uint8_t *buf);
+
+/* Zero copy: send len bytes of a received buffer (edited in place) on
+ * macPort. On success the buffer goes back to RX by itself once the frame
+ * is out; do not call CpswMin_recvDone() for it. On failure (no free TX
+ * descriptor) the caller still owns it. */
+int32_t  CpswMin_sendRx(CpswMin_Obj *h, uint8_t *buf, uint32_t len, uint32_t macPort);
 
 #ifdef __cplusplus
 }

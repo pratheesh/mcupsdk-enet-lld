@@ -652,14 +652,41 @@ uint32_t CpswMin_poll(CpswMin_Obj *h)
     return mask;
 }
 
-uint8_t *CpswMin_getTxBuf(CpswMin_Obj *h)
+static void rxRecycle(CpswMin_Obj *h, uint32_t idx)
+{
+    CpswMin_Desc *d = &h->rxDesc[idx];
+
+    d->descInfo = DESC_WORD0;
+    d->bufInfo1 = CPSW_MIN_BUF_SIZE;
+    wbCache(d, sizeof(*d));
+    invCache(h->rxBuf[idx], CPSW_MIN_BUF_SIZE);
+    ringPush(&h->rxRing, d);
+}
+
+/* Reclaim completed TX descriptors; an RX buffer lent by CpswMin_sendRx()
+ * goes back to RX and the descriptor gets its own TX buffer again. */
+static void txReap(CpswMin_Obj *h)
 {
     CpswMin_Desc *d;
 
     while ((d = (CpswMin_Desc *)ringPop(&h->txRing)) != NULL)
     {
-        h->txFree[h->txFreeCnt++] = (uint8_t)(d - h->txDesc);
+        uint32_t i = (uint32_t)(d - h->txDesc);
+
+        if (h->txRx[i] != 0U)
+        {
+            rxRecycle(h, h->txRx[i] - 1U);
+            h->txRx[i] = 0U;
+            d->bufPtr[0] = (uint32_t)(uintptr_t)h->txBuf[i];
+            d->orgBufPtr[0] = d->bufPtr[0];
+        }
+        h->txFree[h->txFreeCnt++] = (uint8_t)i;
     }
+}
+
+uint8_t *CpswMin_getTxBuf(CpswMin_Obj *h)
+{
+    txReap(h);
     return (h->txFreeCnt != 0U) ? h->txBuf[h->txFree[--h->txFreeCnt]] : NULL;
 }
 
@@ -712,17 +739,48 @@ uint8_t *CpswMin_recv(CpswMin_Obj *h, uint32_t *len, uint32_t *macPort)
             h->rxPkts++;
         }
     }
+    if (buf == NULL)
+    {
+        txReap(h);      /* RX idle: reclaim TX, return lent RX buffers */
+    }
     return buf;
 }
 
 void CpswMin_recvDone(CpswMin_Obj *h, uint8_t *buf)
 {
-    uint32_t idx = (uint32_t)(buf - h->rxBuf[0]) / CPSW_MIN_BUF_SIZE;
-    CpswMin_Desc *d = &h->rxDesc[idx];
+    rxRecycle(h, (uint32_t)(buf - h->rxBuf[0]) / CPSW_MIN_BUF_SIZE);
+}
 
-    d->descInfo = DESC_WORD0;
-    d->bufInfo1 = CPSW_MIN_BUF_SIZE;
+int32_t CpswMin_sendRx(CpswMin_Obj *h, uint8_t *buf, uint32_t len, uint32_t macPort)
+{
+    uint32_t r = (uint32_t)(buf - h->rxBuf[0]) / CPSW_MIN_BUF_SIZE;
+    uint32_t i;
+    CpswMin_Desc *d;
+
+    if (h->txFreeCnt == 0U)
+    {
+        txReap(h);      /* normally done by CpswMin_recv() when RX is idle */
+    }
+    if ((r >= CPSW_MIN_NUM_RX) || (len > CPSW_MIN_BUF_SIZE) || (h->txFreeCnt == 0U))
+    {
+        return SystemP_FAILURE;
+    }
+    if (len < 60U)
+    {
+        memset(&buf[len], 0, 60U - len);
+        len = 60U;
+    }
+    i = h->txFree[--h->txFreeCnt];
+    h->txRx[i] = (uint8_t)(r + 1U);
+    d = &h->txDesc[i];
+    d->bufPtr[0] = (uint32_t)(uintptr_t)buf;
+    d->orgBufPtr[0] = d->bufPtr[0];
+    d->descInfo  = DESC_WORD0 | len;
+    d->srcDstTag = macPort;
+    d->bufInfo1  = len;
+    wbCache(buf, len);
     wbCache(d, sizeof(*d));
-    invCache(buf, CPSW_MIN_BUF_SIZE);
-    ringPush(&h->rxRing, d);
+    ringPush(&h->txRing, d);
+    h->txPkts++;
+    return SystemP_SUCCESS;
 }

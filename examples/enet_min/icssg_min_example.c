@@ -124,7 +124,8 @@ static void echo(IcssgMin_Obj *h, const uint8_t *rx, uint32_t len)
 
 void icssg_min_example_main(void *args)
 {
-    uint64_t now, nextPoll = 0U, nextTest = 0U, nextLog = 0U;
+    uint64_t now, nextPoll = 0U, nextTest = 0U, nextLog = 0U, lastRx = 0U;
+    uint32_t lastRxPkts = 0U;
     uint32_t link = 0U, seq = 0U, len;
     uint8_t *rx;
 
@@ -168,7 +169,15 @@ void icssg_min_example_main(void *args)
             nextTest = now + 1000000U;
         }
 
-        if (now >= nextLog)
+        /* Counters only once RX has been quiet for 1 s: the SDK UART log
+         * blocks until the line is out (about 0.4 ms), long enough for a
+         * line-rate burst to overrun the RX ring. */
+        if (gIcssg.rxPkts != lastRxPkts)
+        {
+            lastRxPkts = gIcssg.rxPkts;
+            lastRx = now;
+        }
+        if ((now >= nextLog) && ((now - lastRx) >= 1000000U))
         {
             DebugP_log("icssg_min: tx %u rx %u rxErr %u\r\n",
                        gIcssg.txPkts, gIcssg.rxPkts, gIcssg.rxErrs);
