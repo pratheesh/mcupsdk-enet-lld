@@ -132,7 +132,9 @@ static void sendTest(CpswMin_Obj *h, uint32_t seq)
     }
 }
 
-static void echo(CpswMin_Obj *h, const uint8_t *rx, uint32_t len, uint32_t port)
+#if defined(CPSW_MIN_ECHO_COPY)
+/* Copying echo: the reply is built in a TX buffer. */
+static void echo(CpswMin_Obj *h, uint8_t *rx, uint32_t len, uint32_t port)
 {
     uint8_t *buf = CpswMin_getTxBuf(h);
 
@@ -143,7 +145,21 @@ static void echo(CpswMin_Obj *h, const uint8_t *rx, uint32_t len, uint32_t port)
         memcpy(&buf[12], &rx[12], len - 12U);
         (void)CpswMin_send(h, buf, len, port);
     }
+    CpswMin_recvDone(h, rx);
 }
+#else
+/* Zero-copy echo: swap the MAC addresses in place and send the RX buffer
+ * itself; the driver hands it back to RX once the frame is out. */
+static void echo(CpswMin_Obj *h, uint8_t *rx, uint32_t len, uint32_t port)
+{
+    memcpy(rx, &rx[6], 6U);
+    memcpy(&rx[6], gCpswCfg.macAddr, 6U);
+    if (CpswMin_sendRx(h, rx, len, port) != SystemP_SUCCESS)
+    {
+        CpswMin_recvDone(h, rx);
+    }
+}
+#endif
 
 void cpsw_min_example_main(void *args)
 {
@@ -203,6 +219,7 @@ void cpsw_min_example_main(void *args)
             /* echo() inlined so copy and send are timed apart */
             uint32_t tc1 = CycleCounterP_getCount32(), tc2 = tc1, tc3 = tc1, tc4;
             uint32_t tseq = tmSeq(rx);
+#if defined(CPSW_MIN_ECHO_COPY)
             uint8_t *buf = CpswMin_getTxBuf(&gCpsw);
 
             if ((len >= 14U) && (buf != NULL))
@@ -215,6 +232,23 @@ void cpsw_min_example_main(void *args)
                 tc3 = CycleCounterP_getCount32();
             }
             CpswMin_recvDone(&gCpsw, rx);
+#else
+            if (len >= 14U)
+            {
+                memcpy(rx, &rx[6], 6U);
+                memcpy(&rx[6], gCpswCfg.macAddr, 6U);
+                tc2 = CycleCounterP_getCount32();
+                if (CpswMin_sendRx(&gCpsw, rx, len, port) != SystemP_SUCCESS)
+                {
+                    CpswMin_recvDone(&gCpsw, rx);
+                }
+                tc3 = CycleCounterP_getCount32();
+            }
+            else
+            {
+                CpswMin_recvDone(&gCpsw, rx);
+            }
+#endif
             tc4 = CycleCounterP_getCount32();
             tmSoftware(tseq, len, tc1 - tc0, tc2 - tc1, tc3 - tc2, tc4 - tc3);
             tcIdle = 0U;
@@ -227,9 +261,12 @@ void cpsw_min_example_main(void *args)
         {
             if (len >= 14U)
             {
-                echo(&gCpsw, rx, len, port);
+                echo(&gCpsw, rx, len, port);    /* returns rx to the driver */
             }
-            CpswMin_recvDone(&gCpsw, rx);
+            else
+            {
+                CpswMin_recvDone(&gCpsw, rx);
+            }
         }
 #endif
 

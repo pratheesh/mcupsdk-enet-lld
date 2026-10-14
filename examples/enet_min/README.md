@@ -33,9 +33,16 @@ both CPSW and ICSSG1 are the same on both boards.
 
 ## Design
 
-* PKTDMA: one TX channel, one RX channel and flow, 8 + 8 host descriptors
-  (128 B) and 1536 B buffers, all embedded in one driver object in cached
-  MSRAM. Rings run in dual-ring mode; cache maintenance is explicit.
+* PKTDMA: one TX channel, one RX channel and flow, 8 TX + 16 RX host
+  descriptors (128 B) and 1536 B buffers, all embedded in one driver object
+  in cached MSRAM. Rings run in dual-ring mode; cache maintenance is
+  explicit.
+* Zero copy (CPSW): `CpswMin_sendRx()` transmits a received buffer edited
+  in place. The TX descriptor borrows the RX buffer, and the buffer goes
+  back to RX when that TX completes. TX completions are reclaimed by
+  `CpswMin_recv()` when no frame is pending, which keeps the RX buffer
+  invalidate off the echo path. The CPSW echo examples use it; build with
+  `-DCPSW_MIN_ECHO_COPY` for the copying echo.
 * Rings, channels, flows and PSI-L pairing are set up with the SDK
   Sciclient RM calls, so the resources must be assigned to r5fss0-0 in
   the board configuration (they are by default).
@@ -82,13 +89,21 @@ Tested on an LP-AM243 (revision E1) against an LP-AM261 running the SOEM
 
 | Image | ICSSG1 (J18) | CPSW (RGMII1, `-DCPSW_MIN_LP_REV_E2`) |
 |---|---|---|
-| lean | 12/12 pass; 60 B RTT 36 us avg; 1514 B 98.2 Mb/s | 12/12 pass; 60 B RTT 35.8 us avg; 1514 B 98.2 Mb/s |
-| standard | 7/12: frames lost and some corrupted under throughput load | 6/12: same pattern |
+| lean | 12/12 pass; 60 B RTT 36 us avg; 1514 B 98.2 Mb/s | 12/12 pass; zero-copy echo: 60 B RTT 33.2 us avg (p99 34), 1514 B RTT 316.5 us, 98.2 Mb/s |
+| standard | 7/12 before the log fix below; not yet retested | 12/12 pass after the log fix |
 
-The standard images fail the same way with both drivers, so the cause is
-in the shared example loop rather than in the drivers. Suspected, not yet
-confirmed: the 5 s console print blocks the poll loop and the RX ring
-overflows; a received buffer is reused before its echo has been sent.
+Standard-image loss, now fixed: the SDK UART log blocks until the line is
+out. The 5 s counter print held the poll loop for about 410 us, the RX
+ring filled and the PKTDMA dropped frames (RX channel DCNT). The examples
+now print counters only after 1 s without RX. The corrupted echoes went
+away with the drops.
+
+Latency split (`-DCPSW_MIN_TIMING`: CPTS timestamps at the MAC plus R5F
+cycle counters), LP-AM243, 60 B, zero copy: the frame spends 11.8 us in
+the board. That is 5.1 us receiving the frame (store and forward), 0.9 us
+recv, 0.1 us MAC swap, 0.65 us send, and about 5 us of RX DMA, poll
+detection and TX DMA. TI's enet_layer2_cpsw (interrupt + task) on the
+same bench: 60 B RTT 43.1 us; it drops 1514 B frames.
 
 Board notes:
 * LP-AM243 E1/E2 select the RGMII1 mux with GPIO0_70. The SDK LP examples
