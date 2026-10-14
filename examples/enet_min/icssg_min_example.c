@@ -32,9 +32,10 @@
 
 /*
  * icssg_min_example: PRU_ICSSG1 MAC port 1 (DP83869 at MDIO address 15 on
- * the AM243x EVM) with the icssg_min driver. Every received frame is sent
- * back to its sender, and a broadcast test frame goes out once a second
- * while the link is up. Counters are printed every 5 seconds.
+ * the AM243x EVM, and on jack J18 of the AM243x LP) with the icssg_min
+ * driver. Every received frame is sent back to its sender, and a broadcast
+ * test frame goes out once a second while the link is up. Counters are
+ * printed every 5 seconds.
  *
  * Build with -DICSSG_MIN_SLICES=1 so only the slice 0 firmware is linked.
  */
@@ -78,6 +79,9 @@ static const IcssgMin_Cfg gIcssgCfg =
     .slice   = 0U,
     .phyAddr = 15U,
     .macAddr = { 0x02U, 0x00U, 0x00U, 0x00U, 0x16U, 0x01U },
+#if defined(ENET_MIN_BOARD_AM243X_LP)
+    .phyDelay = 0x0311U,    /* TX 0.5 ns, RX 0.5 ns (Enet LLD LP default) */
+#endif
 };
 
 static void sendTest(IcssgMin_Obj *h, uint32_t seq)

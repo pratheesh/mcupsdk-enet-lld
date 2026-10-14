@@ -547,7 +547,7 @@ static void phyRmw(uintptr_t mdio, uint32_t phy, uint32_t reg, uint16_t mask, ui
     mdioWrite(mdio, phy, reg, (uint16_t)((mdioRead(mdio, phy, reg) & ~mask) | (val & mask)));
 }
 
-static void phyConfig(uintptr_t mdio, uint32_t phy)
+static void phyConfig(uintptr_t mdio, uint32_t phy, uint16_t delay)
 {
     uint32_t tries = 0U;
 
@@ -568,7 +568,7 @@ static void phyConfig(uintptr_t mdio, uint32_t phy)
     phyRmw(mdio, phy, PHY_CFG3, 0x0200U, 0x0200U);
     phyRmwExt(mdio, phy, DP_OP_MODE_DECODE, 0x0020U, 0U);       /* RGMII */
     phyRmwExt(mdio, phy, DP_RGMIICTL, 0x0003U, 0U);             /* 0 = clk shift on */
-    phyWriteExt(mdio, phy, DP_RGMIIDCTL, 0x0327U);              /* TX 0.75, RX 2.0 ns */
+    phyWriteExt(mdio, phy, DP_RGMIIDCTL, delay);                /* EVM: TX 0.75, RX 2.0 ns */
     phyRmw(mdio, phy, PHY_PHYCR, 0xC000U, 0x4000U);
     phyRmwExt(mdio, phy, DP_IOMUXCFG, 0x001FU, 0x001FU);        /* 35 ohm */
     phyRmw(mdio, phy, PHY_BMCR, 0x1200U, 0x1200U);
@@ -867,7 +867,8 @@ int32_t IcssgMin_open(IcssgMin_Obj *h, const IcssgMin_Cfg *cfg)
 
         REG32(base + MDIO_BASE_OFS + MDIO_POLL_EN) = 0U;
         REG32(base + MDIO_BASE_OFS + MDIO_POLL) |= (1U << 31) | (1U << 30);
-        phyConfig(base + MDIO_BASE_OFS, h->phyAddr);
+        phyConfig(base + MDIO_BASE_OFS, h->phyAddr,
+                  (cfg->phyDelay != 0U) ? cfg->phyDelay : 0x0327U);
     }
     return status;
 }

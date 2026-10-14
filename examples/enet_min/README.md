@@ -8,14 +8,28 @@ management through the TISCI firmware), CacheP/ClockP, Pinmux and DebugP.
 
 | File | What it is |
 |---|---|
-| `cpsw_min.c/.h` | CPSW3G: ALE bypass, host port, MAC ports 1/2, DP83867 PHY, MDIO manual mode |
+| `cpsw_min.c/.h` | CPSW3G: ALE bypass, host port, MAC ports 1/2, DP83867 or DP83869 PHY (by PHY ID), MDIO manual mode |
 | `icssg_min.c/.h` | ICSSG dual-MAC firmware load/config, one slice per object, DP83869 PHY |
 | `cpsw_min_example.c` | CPSW port 1 echo + 1 s broadcast test frame |
 | `icssg_min_example.c` | ICSSG1 port 1 echo + 1 s broadcast test frame |
-| `{cpsw,icssg}/am243x-evm/r5fss0-0_nortos` | Projects (hello_world SysConfig: UART log, MPU, clocks only) |
+| `{cpsw,icssg}/am243x-{evm,lp}/r5fss0-0_nortos` | Projects (hello_world SysConfig: UART log, MPU, clocks only) |
 | `min_log.c/.h` | Polled UART0 console with an integer-only formatter; replaces the DPL log backend |
-| `{cpsw,icssg}_lean/am243x-evm/r5fss0-0_nortos` | Same examples without the SysConfig UART/CCS log, printf or stdio; 1 KB heap, 4 KB stack |
+| `{cpsw,icssg}_lean/am243x-{evm,lp}/r5fss0-0_nortos` | Same examples without the SysConfig UART/CCS log, printf or stdio; 1 KB heap, 4 KB stack |
 | `hello_lean.c`, `hello_lean/am243x-evm/r5fss0-0_nortos` | nortos hello_world on `min_log.c` (no UART driver, printf or stdio): the SDK floor the lean examples build on |
+
+## Boards
+
+| | AM243x EVM | AM243x LP (`-DENET_MIN_BOARD_AM243X_LP`) |
+|---|---|---|
+| CPSW port 1 | DP83867, MDIO address 0 | DP83869 on the RGMII1 jack, MDIO address 3 |
+| CPSW MDIO pins | PRG0_PRU1_GPO19/18 | PRG1_MDIO0_MDC/MDIO, shared with PRU_ICSSG1 |
+| CPSW extras | | GPIO0_26 PHY reset and GPIO0_27 RGMII1 mux select, both driven high |
+| ICSSG1 port 1 | DP83869, MDIO address 15 | DP83869 on jack J18, MDIO address 15 |
+| ICSSG PHY delay | TX 0.75 ns, RX 2.0 ns | TX 0.5 ns, RX 0.5 ns (`IcssgMin_Cfg.phyDelay`) |
+
+The LP projects differ from the EVM ones only in the SysConfig package
+(ALX), the UART0 balls and the missing DDR MPU region. The RGMII1 pins of
+both CPSW and ICSSG1 are the same on both boards.
 
 ## Design
 
@@ -56,11 +70,13 @@ gmake -C icssg_lean/am243x-evm/r5fss0-0_nortos/ti-arm-clang all
 gmake -C hello_lean/am243x-evm/r5fss0-0_nortos/ti-arm-clang all
 ```
 
+Use `am243x-lp` in place of `am243x-evm` for the LP projects.
+
 The makefiles expect this repo at `source/networking/enet/core` inside the
 MCU+ SDK, like the other Enet examples.
 
 ## Status
 
-Not yet tested on hardware. Open items: the ICSSG core clock is left at the
+Not yet tested on hardware (EVM or LP). Open items: the ICSSG core clock is left at the
 boot default (set `ICSSG_MIN_CORE_CLK_HZ` to force one), and the VBUSM QoS
 priority settings done by the Enet LLD are skipped.

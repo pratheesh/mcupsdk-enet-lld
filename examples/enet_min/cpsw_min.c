@@ -416,10 +416,11 @@ static void mdioWrite(uint32_t phy, uint32_t reg, uint16_t val)
     mdioFrameEnd();
 }
 
-/* ---- PHY (TI DP83867, as on the AM243x EVM CPSW port 1) ---------------- */
+/* ---- PHY (TI DP83867 on the AM243x EVM, DP83869 on the AM243x LP) ------- */
 
 #define PHY_BMCR                (0x00U)
 #define PHY_BMSR                (0x01U)
+#define PHY_PHYIDR2             (0x03U)
 #define PHY_MMD_CR              (0x0DU)
 #define PHY_MMD_DR              (0x0EU)
 #define PHY_PHYCR               (0x10U)
@@ -434,6 +435,10 @@ static void mdioWrite(uint32_t phy, uint32_t reg, uint16_t val)
 #define DP_LOOPCR               (0xFEU)
 #define DP_DSPFFECFG            (0x12CU)
 #define DP_IOMUXCFG             (0x170U)
+#define DP_OP_MODE_DECODE       (0x1DFU)    /* DP83869 only */
+
+#define PHY_MODEL(id2)          (((id2) >> 4) & 0x3FU)
+#define DP83869_MODEL           (0x0FU)
 
 static uint16_t phyReadExt(uint32_t phy, uint32_t reg)
 {
@@ -480,8 +485,18 @@ static void phyConfig(uint32_t phy)
     phyRmw(phy, PHY_CTRL, 0x4000U, 0x4000U);            /* SW restart */
     phyRmw(phy, PHY_PHYCR, 0x0060U, 0x0040U);           /* auto MDI-X */
     phyRmw(phy, PHY_CFG3, 0x0200U, 0x0200U);            /* robust auto MDI-X */
-    phyRmwExt(phy, DP_RGMIICTL, 0x0083U, 0x0083U);      /* RGMII + TX/RX clk shift */
-    phyWriteExt(phy, DP_RGMIIDCTL, 0x0007U);            /* TX 0.25 ns, RX 2.0 ns */
+    if (PHY_MODEL(mdioRead(phy, PHY_PHYIDR2)) == DP83869_MODEL)
+    {
+        /* Enet LLD CPSW defaults for the DP83869: the MAC adds the TX delay */
+        phyRmwExt(phy, DP_OP_MODE_DECODE, 0x0020U, 0U); /* RGMII */
+        phyRmwExt(phy, DP_RGMIICTL, 0x0003U, 0x0002U);  /* RX clk shift only */
+        phyWriteExt(phy, DP_RGMIIDCTL, 0x0311U);        /* TX 0.5 ns, RX 0.5 ns */
+    }
+    else
+    {
+        phyRmwExt(phy, DP_RGMIICTL, 0x0083U, 0x0083U);  /* RGMII + TX/RX clk shift */
+        phyWriteExt(phy, DP_RGMIIDCTL, 0x0007U);        /* TX 0.25 ns, RX 2.0 ns */
+    }
     phyRmw(phy, PHY_PHYCR, 0xC000U, 0x4000U);           /* TX FIFO depth 4 */
     phyRmwExt(phy, DP_IOMUXCFG, 0x001FU, 0x001FU);      /* 35 ohm output impedance */
     phyRmw(phy, PHY_BMCR, 0x1200U, 0x1200U);            /* autoneg enable+restart */

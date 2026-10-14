@@ -31,10 +31,11 @@
  */
 
 /*
- * cpsw_min_example: CPSW MAC port 1 (DP83867 on the AM243x EVM) with the
- * cpsw_min driver. Every received frame is sent back to its sender, and a
- * broadcast test frame goes out once a second while the link is up.
- * Counters are printed every 5 seconds.
+ * cpsw_min_example: CPSW MAC port 1 (DP83867 on the AM243x EVM, DP83869 on
+ * the RGMII1 jack of the AM243x LP) with the cpsw_min driver. Every
+ * received frame is sent back to its sender, and a broadcast test frame
+ * goes out once a second while the link is up. Counters are printed every
+ * 5 seconds.
  */
 
 #include <string.h>
@@ -42,16 +43,37 @@
 #include <kernel/dpl/DebugP.h>
 #include <kernel/dpl/SystemP.h>
 #include <drivers/pinmux.h>
+#if defined(ENET_MIN_BOARD_AM243X_LP)
+#include <drivers/gpio.h>
+#include <drivers/hw_include/cslr_soc.h>
+#endif
 #include "cpsw_min.h"
 
 #define TEST_ETHERTYPE      (0x88B5U)   /* IEEE local experimental */
 
-/* RGMII1 + MDIO on the AM243x EVM (values from the Enet SysConfig output) */
+/* RGMII1 + MDIO (values from the Enet SysConfig output). The RGMII1 pins
+ * are the same on both boards; the LP routes MDIO0 to the PRG1_MDIO0 pins,
+ * which it shares with PRU_ICSSG1, and has a PHY reset and an RGMII1 mux
+ * select on GPIO0_26/27 (GPMC0_AD11/12). */
 #define RGMII_IN            (PIN_MODE(4) | PIN_INPUT_ENABLE | PIN_PULL_DISABLE)
+#if defined(ENET_MIN_BOARD_AM243X_LP)
+#define PHY_ADDR            (3U)
+#define GPIO_PHY_RST        (26U)
+#define GPIO_MUX_SEL        (27U)
+#else
+#define PHY_ADDR            (0U)
+#endif
 static const Pinmux_PerCfg_t gCpswPins[] =
 {
+#if defined(ENET_MIN_BOARD_AM243X_LP)
+    { PIN_GPMC0_AD11,      PIN_MODE(7) | PIN_INPUT_ENABLE | PIN_PULL_DIRECTION },  /* PHY RST */
+    { PIN_GPMC0_AD12,      PIN_MODE(7) | PIN_INPUT_ENABLE | PIN_PULL_DIRECTION },  /* MUX SEL */
+    { PIN_PRG1_MDIO0_MDC,  PIN_MODE(4) | PIN_PULL_DISABLE },     /* MDC   */
+    { PIN_PRG1_MDIO0_MDIO, RGMII_IN },                           /* MDIO  */
+#else
     { PIN_PRG0_PRU1_GPO19, PIN_MODE(4) | PIN_PULL_DISABLE },     /* MDC   */
     { PIN_PRG0_PRU1_GPO18, RGMII_IN },                           /* MDIO  */
+#endif
     { PIN_PRG0_PRU1_GPO7,  RGMII_IN },                           /* RD0   */
     { PIN_PRG0_PRU1_GPO9,  RGMII_IN },                           /* RD1   */
     { PIN_PRG0_PRU1_GPO10, RGMII_IN },                           /* RD2   */
@@ -73,7 +95,7 @@ static const CpswMin_Cfg gCpswCfg =
 {
     .macAddr  = { 0x02U, 0x00U, 0x00U, 0x00U, 0x43U, 0x01U },
     .numPorts = 1U,
-    .port     = { { .macPort = 1U, .phyAddr = 0U } },
+    .port     = { { .macPort = 1U, .phyAddr = PHY_ADDR } },
 };
 
 static void sendTest(CpswMin_Obj *h, uint32_t seq)
@@ -111,6 +133,13 @@ void cpsw_min_example_main(void *args)
     uint8_t *rx;
 
     Pinmux_config(gCpswPins, PINMUX_DOMAIN_ID_MAIN);
+#if defined(ENET_MIN_BOARD_AM243X_LP)
+    /* PHY out of reset, RGMII1 jack to CPSW (as the Enet LP examples do) */
+    GPIO_setDirMode(CSL_GPIO0_BASE, GPIO_PHY_RST, GPIO_DIRECTION_OUTPUT);
+    GPIO_setDirMode(CSL_GPIO0_BASE, GPIO_MUX_SEL, GPIO_DIRECTION_OUTPUT);
+    GPIO_pinWriteHigh(CSL_GPIO0_BASE, GPIO_PHY_RST);
+    GPIO_pinWriteHigh(CSL_GPIO0_BASE, GPIO_MUX_SEL);
+#endif
 
     if (CpswMin_open(&gCpsw, &gCpswCfg) != SystemP_SUCCESS)
     {
