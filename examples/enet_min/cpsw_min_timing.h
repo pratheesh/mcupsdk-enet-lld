@@ -37,6 +37,12 @@
 #define TM_CPTS_EVENT_1         (TM_CPSW + 0x3D038U)
 #define TM_CPTS_EVENT_3         (TM_CPSW + 0x3D040U)
 
+#define TM_RX_DCNT              (CSL_DMASS0_PKTDMA_RCHANRT_BASE + 0x404U + (16U * 0x1000U))
+#define TM_RING_FOCC(r)         (CSL_DMASS0_PKTDMA_RINGRT_BASE + 0x0018U + ((r) * 0x2000U))
+#define TM_RING_ROCC(r)         (CSL_DMASS0_PKTDMA_RINGRT_BASE + 0x1018U + ((r) * 0x2000U))
+#define TM_RX_RING              (129U)
+#define TM_DROPS                (64U)
+
 #define TM_EV_PUSH              (0U)
 #define TM_EV_ETH_RX            (4U)
 #define TM_EV_ETH_TX            (5U)
@@ -81,6 +87,42 @@ typedef struct
     uint32_t recv, copy, send, done;
     uint64_t gap;           /* CPTS ticks since the previous RX SFD */
 } TmSlot;
+
+typedef struct
+{
+    uint32_t cycle;         /* CPU cycle when the drop was seen */
+    uint32_t delta;         /* drops since the previous check */
+    uint32_t focc;          /* RX ring forward (free) occupancy */
+    uint32_t rocc;          /* RX ring reverse (completion) occupancy */
+    uint32_t sinceLoop;     /* cycles since the previous loop iteration */
+    uint32_t lastBatch;     /* frames handled in the previous batch */
+} TmDrop;
+
+volatile TmDrop gTmDrop[TM_DROPS];
+volatile uint32_t gTmDropN;
+static uint32_t gTmDcnt, gTmLoopCyc, gTmBatch;
+
+/* PKTDMA RX drops: log the instant and the ring state of each new drop */
+static void tmDropCheck(uint32_t nowCyc, uint32_t batch)
+{
+    uint32_t d = TM_REG32(TM_RX_DCNT);
+
+    if ((d != gTmDcnt) && (gTmDcnt != 0U))
+    {
+        uint32_t i = gTmDropN % TM_DROPS;
+
+        gTmDrop[i].cycle = nowCyc;
+        gTmDrop[i].delta = d - gTmDcnt;
+        gTmDrop[i].focc = TM_REG32(TM_RING_FOCC(TM_RX_RING));
+        gTmDrop[i].rocc = TM_REG32(TM_RING_ROCC(TM_RX_RING));
+        gTmDrop[i].sinceLoop = nowCyc - gTmLoopCyc;
+        gTmDrop[i].lastBatch = gTmBatch;
+        gTmDropN++;
+    }
+    gTmDcnt = (d == 0U) ? 1U : d;
+    gTmLoopCyc = nowCyc;
+    gTmBatch = batch;
+}
 
 volatile TmStats gTiming;
 static TmSlot gTmSlot[TM_SLOTS];

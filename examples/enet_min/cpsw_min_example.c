@@ -147,11 +147,12 @@ static void echo(CpswMin_Obj *h, const uint8_t *rx, uint32_t len, uint32_t port)
 
 void cpsw_min_example_main(void *args)
 {
-    uint64_t now, nextPoll = 0U, nextTest = 0U, nextLog = 0U;
+    uint64_t now, nextPoll = 0U, nextTest = 0U, nextLog = 0U, lastRx = 0U;
+    uint32_t lastRxPkts = 0U;
     uint32_t link = 0U, seq = 0U, len, port;
     uint8_t *rx;
 #if defined(CPSW_MIN_TIMING)
-    uint32_t tc0, tcIdle = 0U;
+    uint32_t tc0, tcIdle = 0U, tbatch = 0U;
 #endif
 
     Pinmux_config(gCpswPins, PINMUX_DOMAIN_ID_MAIN);
@@ -186,6 +187,8 @@ void cpsw_min_example_main(void *args)
 #if defined(CPSW_MIN_TIMING)
         tmDrain();
         tc0 = CycleCounterP_getCount32();
+        tmDropCheck(tc0, tbatch);
+        tbatch = 0U;
         rx = CpswMin_recv(&gCpsw, &len, &port);
         if (rx == NULL)
         {
@@ -215,6 +218,7 @@ void cpsw_min_example_main(void *args)
             tc4 = CycleCounterP_getCount32();
             tmSoftware(tseq, len, tc1 - tc0, tc2 - tc1, tc3 - tc2, tc4 - tc3);
             tcIdle = 0U;
+            tbatch++;
             tc0 = CycleCounterP_getCount32();
             rx = CpswMin_recv(&gCpsw, &len, &port);
         }
@@ -247,7 +251,15 @@ void cpsw_min_example_main(void *args)
             nextTest = now + 1000000U;
         }
 
-        if (now >= nextLog)
+        /* Counters only once RX has been quiet for 1 s: the SDK UART log
+         * blocks until the line is out (about 0.4 ms), long enough for a
+         * line-rate burst to overrun the RX ring. */
+        if (gCpsw.rxPkts != lastRxPkts)
+        {
+            lastRxPkts = gCpsw.rxPkts;
+            lastRx = now;
+        }
+        if ((now >= nextLog) && ((now - lastRx) >= 1000000U))
         {
             DebugP_log("cpsw_min: tx %u rx %u rxErr %u\r\n",
                        gCpsw.txPkts, gCpsw.rxPkts, gCpsw.rxErrs);
