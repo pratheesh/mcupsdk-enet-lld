@@ -58,16 +58,29 @@
 #define RGMII_IN            (PIN_MODE(4) | PIN_INPUT_ENABLE | PIN_PULL_DISABLE)
 #if defined(ENET_MIN_BOARD_AM243X_LP)
 #define PHY_ADDR            (3U)
+#if defined(CPSW_MIN_LP_REV_E2)
+/* E1/E2 boards: the mux select is GPIO0_70 (ball AA11), as in the SDK's
+ * generated LP board config; GPIO0_26/27 drive the user LEDs there. */
+#define GPIO_MUX_SEL        (70U)
+#else
 #define GPIO_PHY_RST        (26U)
 #define GPIO_MUX_SEL        (27U)
+#endif
+#ifndef CPSW_MIN_LP_MUX_LEVEL
+#define CPSW_MIN_LP_MUX_LEVEL   (1)
+#endif
 #else
 #define PHY_ADDR            (0U)
 #endif
 static const Pinmux_PerCfg_t gCpswPins[] =
 {
 #if defined(ENET_MIN_BOARD_AM243X_LP)
+#if defined(CPSW_MIN_LP_REV_E2)
+    { PIN_PRG1_PRU1_GPO5,  PIN_MODE(7) | PIN_INPUT_ENABLE | PIN_PULL_DISABLE },    /* MUX SEL */
+#else
     { PIN_GPMC0_AD11,      PIN_MODE(7) | PIN_INPUT_ENABLE | PIN_PULL_DIRECTION },  /* PHY RST */
     { PIN_GPMC0_AD12,      PIN_MODE(7) | PIN_INPUT_ENABLE | PIN_PULL_DIRECTION },  /* MUX SEL */
+#endif
     { PIN_PRG1_MDIO0_MDC,  PIN_MODE(4) | PIN_PULL_DISABLE },     /* MDC   */
     { PIN_PRG1_MDIO0_MDIO, RGMII_IN },                           /* MDIO  */
 #else
@@ -135,10 +148,16 @@ void cpsw_min_example_main(void *args)
     Pinmux_config(gCpswPins, PINMUX_DOMAIN_ID_MAIN);
 #if defined(ENET_MIN_BOARD_AM243X_LP)
     /* PHY out of reset, RGMII1 jack to CPSW (as the Enet LP examples do) */
+#if defined(GPIO_PHY_RST)
     GPIO_setDirMode(CSL_GPIO0_BASE, GPIO_PHY_RST, GPIO_DIRECTION_OUTPUT);
-    GPIO_setDirMode(CSL_GPIO0_BASE, GPIO_MUX_SEL, GPIO_DIRECTION_OUTPUT);
     GPIO_pinWriteHigh(CSL_GPIO0_BASE, GPIO_PHY_RST);
+#endif
+    GPIO_setDirMode(CSL_GPIO0_BASE, GPIO_MUX_SEL, GPIO_DIRECTION_OUTPUT);
+#if (CPSW_MIN_LP_MUX_LEVEL != 0)
     GPIO_pinWriteHigh(CSL_GPIO0_BASE, GPIO_MUX_SEL);
+#else
+    GPIO_pinWriteLow(CSL_GPIO0_BASE, GPIO_MUX_SEL);
+#endif
 #endif
 
     if (CpswMin_open(&gCpsw, &gCpswCfg) != SystemP_SUCCESS)
