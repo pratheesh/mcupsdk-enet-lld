@@ -43,6 +43,7 @@
 #include <kernel/dpl/ClockP.h>
 #include <kernel/dpl/DebugP.h>
 #include <kernel/dpl/SystemP.h>
+#include <drivers/soc.h>
 #include <drivers/pinmux.h>
 #if defined(ENET_MIN_BOARD_AM243X_LP)
 #include <drivers/gpio.h>
@@ -260,6 +261,410 @@ static void echo(CpswMin_Obj *h, uint8_t *rx, uint32_t len, uint32_t port)
 }
 #endif
 
+#if defined(CPSW_MIN_TESTER)
+
+/*
+ * Tester mode: instead of echoing, drive a far-end echo (another enet_min
+ * example, or any peer that swaps the MACs and returns the frame) and print
+ * the same "ECHO ..." result lines as the SOEM tester (ecat-echo,
+ * examples/soem_slaveinfo/echo_test.c), so the bench parser works on both.
+ * Frame format and test matrix are copied from there. TX uses the copying
+ * getTxBuf/send path, RX recv/recvDone; nothing is printed while timing.
+ */
+#include <kernel/dpl/CycleCounterP.h>
+
+#define ECHO_MAGIC          (0x4F484345U)   /* "ECHO" */
+#define ECHO_HDR            (14U + 12U)     /* Ethernet + magic, seq, len */
+#define ECHO_MAX_FRAME      (1514U)
+#define ECHO_RTT_FRAMES     (2000U)
+#define ECHO_RTT_TIMEOUT    (10000U)        /* us */
+#define ECHO_TPUT_SECS      (5U)
+#define ECHO_TPUT_TIMEOUT   (20000U)        /* us before an echo counts lost */
+#define ECHO_MAX_WIN        (8U)
+#define ECHO_HIST_BINS      (2048U)         /* 1 us bins */
+#define ECHO_START_DELAY_US (2000000U)
+
+typedef struct
+{
+    uint32_t ok, lost, bad, other, late, extraLen;
+} EchoCounts;
+
+static uint32_t gHist[ECHO_HIST_BINS];
+static uint8_t  gDst[6] = { 0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU };
+static uint32_t gDstKnown;
+static uint32_t gCpuMhz;
+
+static uint8_t patByte(uint32_t seq, uint32_t i)
+{
+    return (uint8_t)((seq * 7U) + i);
+}
+
+static void put32(uint8_t *p, uint32_t v)
+{
+    p[0] = (uint8_t)v;
+    p[1] = (uint8_t)(v >> 8);
+    p[2] = (uint8_t)(v >> 16);
+    p[3] = (uint8_t)(v >> 24);
+}
+
+static uint32_t get32(const uint8_t *p)
+{
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) |
+           ((uint32_t)p[3] << 24);
+}
+
+/* Build and send one frame; 1 if it went out */
+static uint32_t sendFrame(uint32_t seq, uint32_t len)
+{
+    uint8_t *buf = CpswMin_getTxBuf(&gCpsw);
+    uint32_t i;
+
+    if (buf == NULL)
+    {
+        return 0U;
+    }
+    memcpy(buf, gDst, 6U);
+    memcpy(&buf[6], gCpswCfg.macAddr, 6U);
+    buf[12] = (uint8_t)(TEST_ETHERTYPE >> 8);
+    buf[13] = (uint8_t)TEST_ETHERTYPE;
+    put32(&buf[14], ECHO_MAGIC);
+    put32(&buf[18], seq);
+    put32(&buf[22], len);
+    for (i = ECHO_HDR; i < len; i++)
+    {
+        buf[i] = patByte(seq, i);
+    }
+    return (CpswMin_send(&gCpsw, buf, len, MAC_PORT) == SystemP_SUCCESS) ? 1U : 0U;
+}
+
+/* Sequence number of an echo of ours, or -1 for anything else. *good is 1 if
+ * every byte matches. The far end's MAC is learned from the first echo. */
+static int32_t checkEcho(const uint8_t *rx, uint32_t rxLen, EchoCounts *c, uint32_t *good)
+{
+    uint32_t seq, len, i;
+
+    *good = 0U;
+    if ((rxLen < ECHO_HDR) || (memcmp(rx, gCpswCfg.macAddr, 6U) != 0) ||
+        (rx[12] != (uint8_t)(TEST_ETHERTYPE >> 8)) || (rx[13] != (uint8_t)TEST_ETHERTYPE) ||
+        (get32(&rx[14]) != ECHO_MAGIC))
+    {
+        c->other++;
+        return -1;
+    }
+    if (gDstKnown == 0U)
+    {
+        memcpy(gDst, &rx[6], 6U);
+        gDstKnown = 1U;
+    }
+    seq = get32(&rx[18]);
+    len = get32(&rx[22]);
+    if ((len > ECHO_MAX_FRAME) || (rxLen < len))
+    {
+        return (int32_t)seq;
+    }
+    if (rxLen > len)
+    {
+        c->extraLen++;
+    }
+    for (i = ECHO_HDR; i < len; i++)
+    {
+        if (rx[i] != patByte(seq, i))
+        {
+            return (int32_t)seq;
+        }
+    }
+    *good = 1U;
+    return (int32_t)seq;
+}
+
+/* Next received frame checked against the echo format: -2 if none pending */
+static int32_t recvEcho(EchoCounts *c, uint32_t *good)
+{
+    uint32_t len, port;
+    uint8_t *rx = CpswMin_recv(&gCpsw, &len, &port);
+    int32_t seq;
+
+    if (rx == NULL)
+    {
+        return -2;
+    }
+    seq = checkEcho(rx, len, c, good);
+    CpswMin_recvDone(&gCpsw, rx);
+    return seq;
+}
+
+static uint32_t isqrt64(uint64_t v)
+{
+    uint64_t x = v, y = (v + 1U) / 2U;
+
+    while (y < x)
+    {
+        x = y;
+        y = (x + (v / x)) / 2U;
+    }
+    return (uint32_t)x;
+}
+
+static uint32_t histPct(uint32_t n, uint32_t permille)
+{
+    uint32_t i, sum = 0U, want = ((n * permille) + 999U) / 1000U;
+
+    for (i = 0U; i < ECHO_HIST_BINS; i++)
+    {
+        sum += gHist[i];
+        if (sum >= want)
+        {
+            return i;
+        }
+    }
+    return ECHO_HIST_BINS;
+}
+
+static int32_t rttTest(uint32_t len)
+{
+    EchoCounts c = { 0 };
+    uint32_t n, good, ns, minNs = 0xFFFFFFFFU, maxNs = 0U;
+    uint64_t sumNs = 0U, sumSq = 0U, avg, var;
+    int32_t seq;
+
+    memset(gHist, 0, sizeof(gHist));
+    for (n = 0U; n < ECHO_RTT_FRAMES; n++)
+    {
+        uint64_t deadline;
+        uint32_t c0, done = 0U;
+
+        c0 = CycleCounterP_getCount32();
+        if (sendFrame(n, len) == 0U)
+        {
+            c.lost++;
+            continue;
+        }
+        deadline = ClockP_getTimeUsec() + ECHO_RTT_TIMEOUT;
+        while (done == 0U)
+        {
+            seq = recvEcho(&c, &good);
+            if (seq != -2)
+            {
+                uint32_t cyc = CycleCounterP_getCount32() - c0;
+
+                if (seq == (int32_t)n)
+                {
+                    done = 1U;
+                    if (good == 0U)
+                    {
+                        c.bad++;
+                        continue;
+                    }
+                    c.ok++;
+                    ns = (uint32_t)(((uint64_t)cyc * 1000U) / gCpuMhz);
+                    minNs = (ns < minNs) ? ns : minNs;
+                    maxNs = (ns > maxNs) ? ns : maxNs;
+                    sumNs += ns;
+                    sumSq += (uint64_t)ns * ns;
+                    gHist[((ns / 1000U) < ECHO_HIST_BINS) ? (ns / 1000U) : (ECHO_HIST_BINS - 1U)]++;
+                }
+                else if ((seq >= 0) && ((uint32_t)seq < n))
+                {
+                    c.late++;
+                }
+                else if (seq >= 0)
+                {
+                    c.bad++;
+                }
+            }
+            else if (ClockP_getTimeUsec() > deadline)
+            {
+                c.lost++;
+                done = 1U;
+            }
+        }
+    }
+
+    avg = (c.ok != 0U) ? (sumNs / c.ok) : 0U;
+    var = (c.ok != 0U) ? ((sumSq / c.ok) - (avg * avg)) : 0U;
+    DebugP_log("ECHO RTT size=%u n=%u ok=%u lost=%u bad=%u other=%u late=%u extralen=%u "
+               "min_ns=%u avg_ns=%u max_ns=%u sd_ns=%u p50_us=%u p99_us=%u p999_us=%u\r\n",
+               (unsigned)len, (unsigned)ECHO_RTT_FRAMES, (unsigned)c.ok, (unsigned)c.lost,
+               (unsigned)c.bad, (unsigned)c.other, (unsigned)c.late, (unsigned)c.extraLen,
+               (unsigned)((c.ok != 0U) ? minNs : 0U), (unsigned)avg, (unsigned)maxNs,
+               (unsigned)isqrt64(var), (unsigned)histPct(c.ok, 500U), (unsigned)histPct(c.ok, 990U),
+               (unsigned)histPct(c.ok, 999U));
+    return ((c.ok == ECHO_RTT_FRAMES) && (c.bad == 0U)) ? 0 : -1;
+}
+
+static int32_t tputTest(uint32_t len, uint32_t win)
+{
+    EchoCounts c = { 0 };
+    uint64_t sentAt[ECHO_MAX_WIN];
+    uint32_t next = 0U, oldest = 0U, good;
+    uint64_t start, now, end, us;
+    uint32_t fps, kbps, lineKbps;
+    int32_t seq;
+
+    start = ClockP_getTimeUsec();
+    end = start + ((uint64_t)ECHO_TPUT_SECS * 1000000U);
+    now = start;
+    while ((now < end) || (oldest != next))
+    {
+        /* keep 'win' frames in flight until the time is up, then drain */
+        if ((now < end) && ((next - oldest) < win))
+        {
+            if (sendFrame(next, len) != 0U)
+            {
+                sentAt[next % ECHO_MAX_WIN] = now;
+                next++;
+            }
+        }
+        seq = recvEcho(&c, &good);
+        now = ClockP_getTimeUsec();
+        if (seq != -2)
+        {
+            if ((seq >= (int32_t)oldest) && (seq < (int32_t)next))
+            {
+                c.lost += (uint32_t)seq - oldest;   /* skipped over */
+                oldest = (uint32_t)seq + 1U;
+                if (good != 0U)
+                {
+                    c.ok++;
+                }
+                else
+                {
+                    c.bad++;
+                }
+            }
+            else if ((seq >= 0) && ((uint32_t)seq < oldest))
+            {
+                c.late++;
+            }
+            else if (seq >= 0)
+            {
+                c.bad++;
+            }
+        }
+        else if ((oldest != next) && ((now - sentAt[oldest % ECHO_MAX_WIN]) > ECHO_TPUT_TIMEOUT))
+        {
+            c.lost++;
+            oldest++;
+        }
+    }
+
+    us = now - start;
+    fps = (uint32_t)(((uint64_t)c.ok * 1000000U) / us);
+    /* Ethernet payload bit rate, and line rate incl. FCS, preamble, IFG */
+    kbps = (uint32_t)(((uint64_t)c.ok * len * 8U * 1000U) / us);
+    lineKbps = (uint32_t)(((uint64_t)c.ok * (len + 24U) * 8U * 1000U) / us);
+    DebugP_log("ECHO TPUT size=%u win=%u sent=%u ok=%u lost=%u bad=%u other=%u late=%u extralen=%u "
+               "us=%u fps=%u kbps=%u line_kbps=%u\r\n",
+               (unsigned)len, (unsigned)win, (unsigned)next, (unsigned)c.ok, (unsigned)c.lost,
+               (unsigned)c.bad, (unsigned)c.other, (unsigned)c.late, (unsigned)c.extraLen,
+               (unsigned)us, (unsigned)fps, (unsigned)kbps, (unsigned)lineKbps);
+    return ((c.ok == next) && (c.bad == 0U) && (next != 0U)) ? 0 : -1;
+}
+
+/* Receive and discard for us microseconds (also lets the driver reap TX) */
+static void drainFor(uint32_t us)
+{
+    EchoCounts c = { 0 };
+    uint32_t good;
+    uint64_t end = ClockP_getTimeUsec() + us;
+
+    while (ClockP_getTimeUsec() < end)
+    {
+        (void)recvEcho(&c, &good);
+    }
+}
+
+static void testerMain(void)
+{
+    static const uint32_t rttSizes[] = { 60U, 128U, 256U, 512U, 1024U, 1514U };
+    static const uint32_t tputSizes[] = { 60U, 1514U };
+    static const uint32_t wins[] = { 1U, 4U, 8U };
+    static const uint32_t probeSizes[] = { 60U, 64U, 128U, 512U };
+    uint32_t i, j, k, fails = 0U, echoed = 0U;
+
+    gCpuMhz = (uint32_t)(SOC_getSelfCpuClk() / 1000000U);
+    CycleCounterP_reset();
+
+    while (CpswMin_poll(&gCpsw) == 0U)
+    {
+        ClockP_usleep(CPSW_MIN_POLL_US);
+    }
+    DebugP_log("cpsw_min: tester, link up, starting in 2 s\r\n");
+    drainFor(ECHO_START_DELAY_US);
+    DebugP_log("ECHO START cpu_mhz=%u mac=%02x:%02x:%02x:%02x:%02x:%02x\r\n", (unsigned)gCpuMhz,
+               gCpswCfg.macAddr[0], gCpswCfg.macAddr[1], gCpswCfg.macAddr[2],
+               gCpswCfg.macAddr[3], gCpswCfg.macAddr[4], gCpswCfg.macAddr[5]);
+
+    /* Probe: 5 frames at each of 4 sizes; the first goes to broadcast, the
+     * far end's MAC is learned from its echo */
+    {
+        EchoCounts c = { 0 };
+        uint32_t good, got, sendFail = 0U, rxAny = 0U;
+
+        for (k = 0U; k < (sizeof(probeSizes) / sizeof(probeSizes[0])); k++)
+        {
+            got = 0U;
+            for (i = 0U; i < 5U; i++)
+            {
+                uint64_t deadline;
+                int32_t seq;
+
+                if (sendFrame(0x7FFF0000U + (k * 16U) + i, probeSizes[k]) == 0U)
+                {
+                    sendFail++;
+                }
+                deadline = ClockP_getTimeUsec() + ECHO_RTT_TIMEOUT;
+                while (ClockP_getTimeUsec() < deadline)
+                {
+                    seq = recvEcho(&c, &good);
+                    if (seq != -2)
+                    {
+                        rxAny++;
+                    }
+                    if (seq >= 0)
+                    {
+                        got++;
+                    }
+                }
+            }
+            DebugP_log("ECHO PROBE size=%u sent=5 echoed=%u\r\n", (unsigned)probeSizes[k], (unsigned)got);
+            echoed += got;
+        }
+        DebugP_log("ECHO PROBE DIAG sendFail=%u rxAny=%u\r\n", (unsigned)sendFail, (unsigned)rxAny);
+        DebugP_log("ECHO PROBE sent=20 echoed=%u other=%u\r\n", (unsigned)echoed, (unsigned)c.other);
+    }
+
+    if (echoed == 0U)
+    {
+        DebugP_log("ECHO RESULT FAIL (no echo from the far end)\r\n");
+    }
+    else
+    {
+        for (i = 0U; i < (sizeof(rttSizes) / sizeof(rttSizes[0])); i++)
+        {
+            fails += (rttTest(rttSizes[i]) != 0) ? 1U : 0U;
+        }
+        for (i = 0U; i < (sizeof(tputSizes) / sizeof(tputSizes[0])); i++)
+        {
+            for (j = 0U; j < (sizeof(wins) / sizeof(wins[0])); j++)
+            {
+                fails += (tputTest(tputSizes[i], wins[j]) != 0) ? 1U : 0U;
+            }
+        }
+        DebugP_log("ECHO RESULT %s (%u of %u tests failed)\r\n", (fails == 0U) ? "PASS" : "FAIL",
+                   (unsigned)fails,
+                   (unsigned)((sizeof(rttSizes) / sizeof(rttSizes[0])) +
+                              ((sizeof(tputSizes) / sizeof(tputSizes[0])) * (sizeof(wins) / sizeof(wins[0])))));
+    }
+
+    for (;;)
+    {
+        drainFor(1000000U);     /* idle, silent */
+    }
+}
+
+#endif
+
 void cpsw_min_example_main(void *args)
 {
     uint64_t now, nextPoll = 0U, nextTest = 0U, nextLog = 0U, lastRx = 0U;
@@ -293,6 +698,9 @@ void cpsw_min_example_main(void *args)
         return;
     }
     DebugP_log("cpsw_min: open done, waiting for link\r\n");
+#if defined(CPSW_MIN_TESTER)
+    testerMain();       /* does not return */
+#endif
 #if defined(CPSW_MIN_TIMING)
     tmInit(1U);
 #endif

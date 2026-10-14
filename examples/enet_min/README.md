@@ -46,6 +46,7 @@ both CPSW and ICSSG1 are the same on both boards.
   `CpswMin_recv()` when no frame is pending, which keeps the RX buffer
   invalidate off the echo path. The CPSW echo examples use it; build with
   `-DCPSW_MIN_ECHO_COPY` for the copying echo.
+* `-DCPSW_MIN_TESTER` (cpsw_min_example.c) turns the example into an echo tester: 2 s after link up it runs the probe, RTT and throughput tests of the SOEM `echo_test.c` against a far-end echo and prints the same `ECHO ...` lines (`ECHO RESULT PASS/FAIL`), then idles.
 * Rings, channels, flows and PSI-L pairing are set up with the SDK
   Sciclient RM calls, so the resources must be assigned to r5fss0-0 in
   the board configuration (they are by default).
