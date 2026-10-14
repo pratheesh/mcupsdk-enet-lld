@@ -23,7 +23,7 @@ management through the TISCI firmware), CacheP/ClockP, Pinmux and DebugP.
 |---|---|---|
 | CPSW port 1 | DP83867, MDIO address 0 | DP83869 on the RGMII1 jack, MDIO address 3 |
 | CPSW MDIO pins | PRG0_PRU1_GPO19/18 | PRG1_MDIO0_MDC/MDIO, shared with PRU_ICSSG1 |
-| CPSW extras | | GPIO0_26 PHY reset and GPIO0_27 RGMII1 mux select, both driven high |
+| CPSW extras | | E3 and later: GPIO0_26 PHY reset and GPIO0_27 RGMII1 mux select, both driven high. E1/E2 (`-DCPSW_MIN_LP_REV_E2`): GPIO0_70 mux select driven high, PHY reset (GPIO0_73) left alone |
 | ICSSG1 port 1 | DP83869, MDIO address 15 | DP83869 on jack J18, MDIO address 15 |
 | ICSSG PHY delay | TX 0.75 ns, RX 2.0 ns | TX 0.5 ns, RX 0.5 ns (`IcssgMin_Cfg.phyDelay`) |
 
@@ -77,6 +77,33 @@ MCU+ SDK, like the other Enet examples.
 
 ## Status
 
-Not yet tested on hardware (EVM or LP). Open items: the ICSSG core clock is left at the
-boot default (set `ICSSG_MIN_CORE_CLK_HZ` to force one), and the VBUSM QoS
-priority settings done by the Enet LLD are skipped.
+Tested on an LP-AM243 (revision E1) against an LP-AM261 running the SOEM
+`x` echo tester over CPSW, 100 Mb/s full duplex. Not yet tested on the EVM.
+
+| Image | ICSSG1 (J18) | CPSW (RGMII1, `-DCPSW_MIN_LP_REV_E2`) |
+|---|---|---|
+| lean | 12/12 pass; 60 B RTT 36 us avg; 1514 B 98.2 Mb/s | 12/12 pass; 60 B RTT 35.8 us avg; 1514 B 98.2 Mb/s |
+| standard | 7/12: frames lost and some corrupted under throughput load | 6/12: same pattern |
+
+The standard images fail the same way with both drivers, so the cause is
+in the shared example loop rather than in the drivers. Suspected, not yet
+confirmed: the 5 s console print blocks the poll loop and the RX ring
+overflows; a received buffer is reused before its echo has been sent.
+
+Board notes:
+* LP-AM243 E1/E2 select the RGMII1 mux with GPIO0_70. The SDK LP examples
+  drive GPIO0_27 (the E3 pin, a user LED on E1/E2), so on those boards
+  the PHY links but no CPSW frame reaches it. Build with
+  `-DCPSW_MIN_LP_REV_E2`. The revision is in the board ID EEPROM (I2C0
+  0x50, offset 0x1A).
+* On E1/E2, do not pulse the PHY reset (GPIO0_73) with the SoC pads
+  attached: the DP83869 re-samples its straps and can come back
+  advertising 1000 Mb/s only.
+* A JTAG system reset does not reset MAIN GPIO, pad configuration or the
+  PHYs. The ICSSG driver power-cycles the ICSSG module at start so that a
+  reload behaves like a cold boot.
+
+Open items: the ICSSG core clock is left at the boot default (set
+`ICSSG_MIN_CORE_CLK_HZ` to force one), the VBUSM QoS priority settings done
+by the Enet LLD are skipped, and the LP board revision is a build option
+rather than read from the EEPROM.
