@@ -63,7 +63,7 @@ implemented in this driver.
 
 ### Descriptors
 16-byte CPPI 3.0 descriptor (`next`, `bufPtr`, `bufOffLen`, `flags`) padded to
-32 B. The 16 descriptors (512 B) are file-static in the NOLOAD output section
+32 B. The 24 descriptors (768 B) are file-static in the NOLOAD output section
 `.bss:ENET_CPPI_DESC`, placed by the project SysConfig into the 8 KB
 `CPPI_DESC` region at 0x70040000, which the MPU maps NonCached (same scheme as
 the SOEM/Enet LLD example; the LLD also rejects cached descriptors). The
@@ -86,13 +86,35 @@ out of order but the hardware walks the chain in append order.
   channel by writing HDP with the reaped descriptor's `next` when `EOQ` is
   set and `next != 0`. This is the same rule as `EnetCpdma_dequeueTx/Rx`.
   HDP is never rewritten while a queue is non-empty and not EOQ-stopped.
-* A stranded TX is restarted promptly because `CpswMin_recv()`, `getTxBuf()`,
-  `send()` and `poll()` all call `txReap()` (the echo loop polls `recv`
-  continuously).
+* A stranded TX is restarted promptly because `CpswMin_recv()` calls
+  `txReap()` whenever no RX frame is pending (the echo loop polls `recv`
+  continuously), and `getTxBuf()`, `send()` and `poll()` reap too.
 * RX completion = `OWNER` clear; length = `flags[11:0]`, ingress port =
   `flags[18:16]`; `flags & 0x03700000` (long, short, overrun, packet error)
   counts as `rxErrs` and the buffer is requeued. CP registers are not
   written (no interrupts are enabled, so there is nothing to acknowledge).
+
+### Zero-copy echo (`CpswMin_sendRx`)
+Same contract as the AM243x version. The caller edits a received buffer in
+place and `CpswMin_sendRx(h, rx, len, port)` transmits it directly:
+* A free TX descriptor is popped from `txFree`; `txRx[i] = rxIndex + 1`
+  records the lend, and the TX descriptor's `bufPtr` is the RX buffer itself
+  (`txQueue()`: `bufPtr`, `bufOffLen` and `flags` length set from `len`, SOP |
+  EOP | OWNER | TO_PORT; cache write-back of the RX buffer; HDP write if the TX
+  queue was empty, else link behind the tail). The descriptor's own TX buffer
+  stays unused. Frames under 60 B are zero-padded in place.
+* The RX buffer is not requeued by the caller. `txReap()` re-initialises the
+  RX descriptor (`rxQueue()`: next = 0, `bufPtr`, `bufOffLen` = buffer size,
+  OWNER, cache invalidate of the buffer) and re-links it at the RX tail, or
+  writes `RX_HDP` if the RX chain had drained, only after OWNER cleared on the
+  TX descriptor. The RX chain therefore shrinks while frames are in TX;
+  16 RX descriptors (`CPSW_MIN_NUM_RX`) against 8 TX leave headroom.
+* TX completions are reaped in `CpswMin_recv()` only when it has no RX frame
+  to return, and in `sendRx` only when `txFreeCnt == 0`. TX EOQ restart works
+  as above (`TX_HDP` = reaped `next`).
+* On failure (bad index, length, no free TX descriptor) it returns
+  `SystemP_FAILURE` and the caller keeps the buffer (`CpswMin_recvDone()`).
+* Descriptor pool: 8 TX + 16 RX x 32 B = 768 B of the 8 KB `CPPI_DESC` region.
 
 ### Teardown
 The driver has no close API (same as AM243x). Teardown is the reset at open

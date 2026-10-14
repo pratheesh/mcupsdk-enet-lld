@@ -132,6 +132,7 @@ typedef struct
     uint8_t       txBuf[CPSW_MIN_NUM_TX][CPSW_MIN_BUF_SIZE] __attribute__((aligned(128)));
     uint8_t       rxBuf[CPSW_MIN_NUM_RX][CPSW_MIN_BUF_SIZE] __attribute__((aligned(128)));
     uint8_t       txFree[CPSW_MIN_NUM_TX];  /* stack of free TX indices */
+    uint8_t       txRx[CPSW_MIN_NUM_TX];    /* RX index + 1 lent to a TX desc */
     uint8_t       txQ[CPSW_MIN_NUM_TX];     /* TX descriptors in queue order */
     uint8_t       rxQ[CPSW_MIN_NUM_RX];     /* RX descriptors in queue order */
     uint32_t      txFreeCnt;

@@ -108,8 +108,11 @@ static int32_t waitReg(uint32_t addr, uint32_t mask, uint32_t val)
 
 /* ---- TX ----------------------------------------------------------------- */
 
+static void rxQueue(CpswMin_Obj *h, uint32_t idx);
+
 /* Reap sent descriptors; restart the channel if it stopped before a
- * descriptor that was linked behind it */
+ * descriptor that was linked behind it. An RX buffer lent by CpswMin_sendRx()
+ * goes back to the RX queue now that its frame is out. */
 static void txReap(CpswMin_Obj *h)
 {
     while (h->txRd != h->txWr)
@@ -123,12 +126,44 @@ static void txReap(CpswMin_Obj *h)
             break;
         }
         h->txRd++;
-        h->txFree[h->txFreeCnt++] = (uint8_t)idx;
         if (((flags & DESC_EOQ) != 0U) && (d->next != 0U))
         {
             REG32(CPDMA_TX_HDP) = d->next;
         }
+        if (h->txRx[idx] != 0U)
+        {
+            uint32_t r = (uint32_t)h->txRx[idx] - 1U;
+
+            h->txRx[idx] = 0U;
+            rxQueue(h, r);
+        }
+        h->txFree[h->txFreeCnt++] = (uint8_t)idx;
     }
+}
+
+/* Fill TX descriptor idx for buf/len and append it to the TX queue. Padding
+ * to 60 B is done by the callers. */
+static void txQueue(CpswMin_Obj *h, uint32_t idx, uint8_t *buf, uint32_t len, uint32_t macPort)
+{
+    CpswMin_Desc *d = &gTxDesc[idx];
+
+    d->next      = 0U;
+    d->bufPtr    = (uint32_t)(uintptr_t)buf;
+    d->bufOffLen = len;
+    d->flags     = DESC_SOP | DESC_EOP | DESC_OWNER | DESC_TO_PORT_EN |
+                   (macPort << DESC_PORT_SHIFT) | len;  /* directed to MAC port */
+    wbCache(buf, len);
+    barrier();
+    if (h->txRd == h->txWr)
+    {
+        REG32(CPDMA_TX_HDP) = (uint32_t)(uintptr_t)d;   /* queue empty: stopped */
+    }
+    else
+    {
+        gTxDesc[h->txQ[(h->txWr - 1U) & (NUM_TX - 1U)]].next = (uint32_t)(uintptr_t)d;
+    }
+    h->txQ[h->txWr++ & (NUM_TX - 1U)] = (uint8_t)idx;
+    h->txPkts++;
 }
 
 /* ---- RX ----------------------------------------------------------------- */
@@ -304,7 +339,6 @@ uint8_t *CpswMin_getTxBuf(CpswMin_Obj *h)
 int32_t CpswMin_send(CpswMin_Obj *h, uint8_t *buf, uint32_t len, uint32_t macPort)
 {
     uint32_t idx = (uint32_t)(buf - h->txBuf[0]) / CPSW_MIN_BUF_SIZE;
-    CpswMin_Desc *d;
 
     if ((idx >= NUM_TX) || (len > CPSW_MIN_BUF_SIZE))
     {
@@ -316,24 +350,7 @@ int32_t CpswMin_send(CpswMin_Obj *h, uint8_t *buf, uint32_t len, uint32_t macPor
         len = 60U;
     }
     txReap(h);
-    d = &gTxDesc[idx];
-    d->next      = 0U;
-    d->bufPtr    = (uint32_t)(uintptr_t)buf;
-    d->bufOffLen = len;
-    d->flags     = DESC_SOP | DESC_EOP | DESC_OWNER | DESC_TO_PORT_EN |
-                   (macPort << DESC_PORT_SHIFT) | len;  /* directed to MAC port */
-    wbCache(buf, len);
-    barrier();
-    if (h->txRd == h->txWr)
-    {
-        REG32(CPDMA_TX_HDP) = (uint32_t)(uintptr_t)d;   /* queue empty: stopped */
-    }
-    else
-    {
-        gTxDesc[h->txQ[(h->txWr - 1U) & (NUM_TX - 1U)]].next = (uint32_t)(uintptr_t)d;
-    }
-    h->txQ[h->txWr++ & (NUM_TX - 1U)] = (uint8_t)idx;
-    h->txPkts++;
+    txQueue(h, idx, buf, len, macPort);
     return SystemP_SUCCESS;
 }
 
@@ -341,7 +358,6 @@ uint8_t *CpswMin_recv(CpswMin_Obj *h, uint32_t *len, uint32_t *macPort)
 {
     uint8_t *buf = NULL;
 
-    txReap(h);      /* the application polls here: restarts a stopped TX */
     while ((buf == NULL) && (h->rxRd != h->rxWr))
     {
         uint32_t idx = h->rxQ[h->rxRd & (NUM_RX - 1U)];
@@ -371,10 +387,43 @@ uint8_t *CpswMin_recv(CpswMin_Obj *h, uint32_t *len, uint32_t *macPort)
             h->rxPkts++;
         }
     }
+    if (buf == NULL)
+    {
+        txReap(h);      /* RX idle: reclaim TX, restart it, return lent RX buffers */
+    }
     return buf;
 }
 
 void CpswMin_recvDone(CpswMin_Obj *h, uint8_t *buf)
 {
     rxQueue(h, (uint32_t)(buf - h->rxBuf[0]) / CPSW_MIN_BUF_SIZE);
+}
+
+/* Zero copy: a TX descriptor is pointed at the RX buffer itself (the TX
+ * descriptor keeps its own, unused, TX buffer; txRx[] records the lend). The
+ * RX buffer re-enters the RX queue from txReap() once the hardware has sent
+ * it, so the RX descriptor is re-initialised and re-linked at the RX tail
+ * only after the frame is out. */
+int32_t CpswMin_sendRx(CpswMin_Obj *h, uint8_t *buf, uint32_t len, uint32_t macPort)
+{
+    uint32_t r = (uint32_t)(buf - h->rxBuf[0]) / CPSW_MIN_BUF_SIZE;
+    uint32_t i;
+
+    if (h->txFreeCnt == 0U)
+    {
+        txReap(h);      /* normally done by CpswMin_recv() when RX is idle */
+    }
+    if ((r >= NUM_RX) || (len > CPSW_MIN_BUF_SIZE) || (h->txFreeCnt == 0U))
+    {
+        return SystemP_FAILURE;
+    }
+    if (len < 60U)
+    {
+        memset(&buf[len], 0, 60U - len);
+        len = 60U;
+    }
+    i = h->txFree[--h->txFreeCnt];
+    h->txRx[i] = (uint8_t)(r + 1U);
+    txQueue(h, i, buf, len, macPort);
+    return SystemP_SUCCESS;
 }
