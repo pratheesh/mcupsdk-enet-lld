@@ -48,8 +48,14 @@
 #include <drivers/hw_include/cslr_soc.h>
 #endif
 #include "cpsw_min.h"
+#if defined(CPSW_MIN_TIMING)
+#include "cpsw_min_timing.h"
+#endif
 
 #define TEST_ETHERTYPE      (0x88B5U)   /* IEEE local experimental */
+#ifndef CPSW_MIN_POLL_US
+#define CPSW_MIN_POLL_US    (100000U)   /* link poll period */
+#endif
 
 /* RGMII1 + MDIO (values from the Enet SysConfig output). The RGMII1 pins
  * are the same on both boards; the LP routes MDIO0 to the PRG1_MDIO0 pins,
@@ -144,6 +150,9 @@ void cpsw_min_example_main(void *args)
     uint64_t now, nextPoll = 0U, nextTest = 0U, nextLog = 0U;
     uint32_t link = 0U, seq = 0U, len, port;
     uint8_t *rx;
+#if defined(CPSW_MIN_TIMING)
+    uint32_t tc0, tcIdle = 0U;
+#endif
 
     Pinmux_config(gCpswPins, PINMUX_DOMAIN_ID_MAIN);
 #if defined(ENET_MIN_BOARD_AM243X_LP)
@@ -166,11 +175,50 @@ void cpsw_min_example_main(void *args)
         return;
     }
     DebugP_log("cpsw_min: open done, waiting for link\r\n");
+#if defined(CPSW_MIN_TIMING)
+    tmInit(1U);
+#endif
 
     for (;;)
     {
         now = ClockP_getTimeUsec();
 
+#if defined(CPSW_MIN_TIMING)
+        tmDrain();
+        tc0 = CycleCounterP_getCount32();
+        rx = CpswMin_recv(&gCpsw, &len, &port);
+        if (rx == NULL)
+        {
+            if (tcIdle != 0U)
+            {
+                tmIdle(tc0 - tcIdle);
+            }
+            tcIdle = tc0;
+        }
+        while (rx != NULL)
+        {
+            /* echo() inlined so copy and send are timed apart */
+            uint32_t tc1 = CycleCounterP_getCount32(), tc2 = tc1, tc3 = tc1, tc4;
+            uint32_t tseq = tmSeq(rx);
+            uint8_t *buf = CpswMin_getTxBuf(&gCpsw);
+
+            if ((len >= 14U) && (buf != NULL))
+            {
+                memcpy(buf, &rx[6], 6U);
+                memcpy(&buf[6], gCpswCfg.macAddr, 6U);
+                memcpy(&buf[12], &rx[12], len - 12U);
+                tc2 = CycleCounterP_getCount32();
+                (void)CpswMin_send(&gCpsw, buf, len, port);
+                tc3 = CycleCounterP_getCount32();
+            }
+            CpswMin_recvDone(&gCpsw, rx);
+            tc4 = CycleCounterP_getCount32();
+            tmSoftware(tseq, len, tc1 - tc0, tc2 - tc1, tc3 - tc2, tc4 - tc3);
+            tcIdle = 0U;
+            tc0 = CycleCounterP_getCount32();
+            rx = CpswMin_recv(&gCpsw, &len, &port);
+        }
+#else
         while ((rx = CpswMin_recv(&gCpsw, &len, &port)) != NULL)
         {
             if (len >= 14U)
@@ -179,6 +227,7 @@ void cpsw_min_example_main(void *args)
             }
             CpswMin_recvDone(&gCpsw, rx);
         }
+#endif
 
         if (now >= nextPoll)
         {
@@ -189,7 +238,7 @@ void cpsw_min_example_main(void *args)
                            (newLink != 0U) ? "up" : "down", gCpsw.port[0].speed);
                 link = newLink;
             }
-            nextPoll = now + 100000U;
+            nextPoll = now + CPSW_MIN_POLL_US;
         }
 
         if ((link != 0U) && (now >= nextTest))
