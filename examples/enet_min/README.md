@@ -90,13 +90,19 @@ Tested on an LP-AM243 (revision E1) against an LP-AM261 running the SOEM
 | Image | ICSSG1 (J18) | CPSW (RGMII1) |
 |---|---|---|
 | lean | 12/12 pass; 60 B RTT 36 us avg; 1514 B 98.2 Mb/s | 12/12 pass; zero-copy echo: 60 B RTT 33.2 us avg (p99 34), 1514 B RTT 316.5 us, 98.2 Mb/s |
-| standard | 7/12 before the log fix below; not yet retested | 12/12 pass after the log fix |
+| standard | 12/12 pass after both fixes below | 12/12 pass after the log fix |
 
 Standard-image loss, now fixed: the SDK UART log blocks until the line is
 out. The 5 s counter print held the poll loop for about 410 us, the RX
 ring filled and the PKTDMA dropped frames (RX channel DCNT). The examples
-now print counters only after 1 s without RX. The corrupted echoes went
-away with the drops.
+now print counters only after 1 s without RX. On CPSW the corrupted
+echoes went away with the drops.
+
+ICSSG corrupted echoes, now fixed: 1514 B echoes came back with zeroed
+64 B runs. The firmware host pool, egress queues and scratch sit in cached
+.bss, and start-up zeroing left dirty D-cache lines over them that were
+later evicted onto frame data. The driver now writes back and invalidates
+that region before the firmware owns it.
 
 Latency split (`-DCPSW_MIN_TIMING`: CPTS timestamps at the MAC plus R5F
 cycle counters), LP-AM243, 60 B, zero copy: the frame spends 11.8 us in
