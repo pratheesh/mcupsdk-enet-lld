@@ -36,8 +36,18 @@
 #include <kernel/dpl/ClockP.h>
 #include <kernel/dpl/SystemP.h>
 #include <drivers/sciclient.h>
+#include <drivers/soc.h>
 #include <drivers/hw_include/cslr_soc.h>
 #include "icssg_min.h"
+
+/* -DICSSG_MIN_TRACE logs the status of each IcssgMin_open() step */
+#if defined(ICSSG_MIN_TRACE)
+#include <kernel/dpl/DebugP.h>
+#define TRACE(name, st)     DebugP_log("icssg_min: %s %d\r\n", (name), (int)(st))
+#else
+#define TRACE(name, st)     ((void)0)
+#endif
+#define STEP(name, call)    do { int32_t st_ = (call); TRACE((name), st_); status |= st_; } while (0)
 
 /* TI dual-MAC firmware images (non-static arrays: include in one file only) */
 #if (ICSSG_MIN_SLICES & 0x1U)
@@ -51,10 +61,15 @@
 #include <networking/enet/core/src/per/firmware/icssg/dualmac/TX_PRU_SLICE1_bin.h>
 #endif
 
-/* Optional: ICSSG core clock in Hz, set before the firmware starts. Leave 0
- * to keep what the SBL / System_init programmed. */
+/* ICSSG core and IEP clocks, set before the firmware starts, with the parents
+ * the Enet LLD examples select in SysConfig. The boot default (200 MHz core
+ * on the AM243x) is not what the firmware runs at with the Enet LLD. Set
+ * ICSSG_MIN_CORE_CLK_HZ to 0 to keep what the SBL / System_init programmed. */
 #ifndef ICSSG_MIN_CORE_CLK_HZ
-#define ICSSG_MIN_CORE_CLK_HZ   (0U)
+#define ICSSG_MIN_CORE_CLK_HZ   (333333333U)
+#endif
+#ifndef ICSSG_MIN_IEP_CLK_HZ
+#define ICSSG_MIN_IEP_CLK_HZ    (200000000U)
 #endif
 
 /* ------------------------------------------------------------------------ */
@@ -158,6 +173,8 @@ static uint8_t gIcssgSmemInit[2];   /* shared RAM cleared once per ICSSG */
 #define IEP_DFLT_CYCLE_NS       (1000000U)
 
 #define MII_RT                  (0x32000U)
+#define MII_RT_RXCFG0           (MII_RT + 0x00U)
+#define MII_RT_RXCFG1           (MII_RT + 0x04U)
 #define MII_RT_TXCFG0           (MII_RT + 0x10U)
 #define MII_RT_TXCFG1           (MII_RT + 0x14U)
 #define MII_RT_TX_IPG(s)        (MII_RT + 0x30U + ((s) * 4U))
@@ -224,18 +241,50 @@ static void invCache(const void *p, uint32_t size)
     CacheP_inv((void *)p, size, CacheP_TYPE_ALLD);
 }
 
-static int32_t powerOn(uint32_t devId)
+/* Power the ICSSG on. With 'reset', an ICSSG that is already on is put
+ * through a module reset first: a debugger reload does not reset it, and
+ * cores left running by an earlier program keep driving the MII and the
+ * shared MMRs. */
+static int32_t powerOn(uint32_t devId, uint32_t reset)
 {
     uint32_t modState = 0U, resetState = 0U, ctxLoss = 0U;
     int32_t status;
 
     status = Sciclient_pmGetModuleState(devId, &modState, &resetState, &ctxLoss,
                                         SystemP_WAIT_FOREVER);
-    if ((status == SystemP_SUCCESS) && (modState == TISCI_MSG_VALUE_DEVICE_HW_STATE_OFF))
+    if ((status == SystemP_SUCCESS) && (modState != TISCI_MSG_VALUE_DEVICE_HW_STATE_OFF) &&
+        (reset != 0U))
     {
-        status = Sciclient_pmSetModuleState(devId, TISCI_MSG_VALUE_DEVICE_SW_STATE_ON,
-                                            TISCI_MSG_FLAG_AOP | TISCI_MSG_FLAG_DEVICE_RESET_ISO,
-                                            SystemP_WAIT_FOREVER);
+        /* A local reset leaves the ICSSG registers and memories as the last
+         * program set them, and the firmware then drops every received frame
+         * after a reload. Power the module off and on, like a cold boot. */
+        uint32_t tries;
+
+        status = Sciclient_pmSetModuleState(devId, TISCI_MSG_VALUE_DEVICE_SW_STATE_AUTO_OFF,
+                                            0U, SystemP_WAIT_FOREVER);
+        for (tries = 0U; (status == SystemP_SUCCESS) && (tries < 1000U); tries++)
+        {
+            status = Sciclient_pmGetModuleState(devId, &modState, &resetState, &ctxLoss,
+                                                SystemP_WAIT_FOREVER);
+            if (modState == TISCI_MSG_VALUE_DEVICE_HW_STATE_OFF)
+            {
+                break;
+            }
+        }
+        if ((status == SystemP_SUCCESS) && (modState != TISCI_MSG_VALUE_DEVICE_HW_STATE_OFF))
+        {
+            status = SystemP_FAILURE;
+        }
+        TRACE("module power cycle", status);
+    }
+    if (status == SystemP_SUCCESS)
+    {
+        if (modState == TISCI_MSG_VALUE_DEVICE_HW_STATE_OFF)
+        {
+            status = Sciclient_pmSetModuleState(devId, TISCI_MSG_VALUE_DEVICE_SW_STATE_ON,
+                                                TISCI_MSG_FLAG_AOP | TISCI_MSG_FLAG_DEVICE_RESET_ISO,
+                                                SystemP_WAIT_FOREVER);
+        }
         if (status == SystemP_SUCCESS)
         {
             status = Sciclient_pmSetModuleRst(devId, 0U, SystemP_WAIT_FOREVER);
@@ -403,12 +452,33 @@ static int32_t flowInit(uint32_t flow, uint32_t ring)
 static int32_t psilPair(uint32_t src, uint32_t dst)
 {
     struct tisci_msg_rm_psil_pair_req req;
+    struct tisci_msg_rm_psil_unpair_req unpair;
+
+    /* A pairing outlives the program that made it (a reload from the
+     * debugger keeps the system firmware running), and pairing twice fails:
+     * drop any old pairing first. */
+    memset(&unpair, 0, sizeof(unpair));
+    unpair.nav_id     = NAV_PSIL;
+    unpair.src_thread = src;
+    unpair.dst_thread = dst;
+    (void)Sciclient_rmPsilUnpair(&unpair, SystemP_WAIT_FOREVER);
 
     memset(&req, 0, sizeof(req));
     req.nav_id     = NAV_PSIL;
     req.src_thread = src;
     req.dst_thread = dst;
     return Sciclient_rmPsilPair(&req, SystemP_WAIT_FOREVER);
+}
+
+static void psilUnpair(uint32_t src, uint32_t dst)
+{
+    struct tisci_msg_rm_psil_unpair_req req;
+
+    memset(&req, 0, sizeof(req));
+    req.nav_id     = NAV_PSIL;
+    req.src_thread = src;
+    req.dst_thread = dst;
+    (void)Sciclient_rmPsilUnpair(&req, SystemP_WAIT_FOREVER);
 }
 
 /* ---- MDIO (manual / bit-bang mode, erratum i2329 workaround) ----------- */
@@ -547,7 +617,7 @@ static void phyRmw(uintptr_t mdio, uint32_t phy, uint32_t reg, uint16_t mask, ui
     mdioWrite(mdio, phy, reg, (uint16_t)((mdioRead(mdio, phy, reg) & ~mask) | (val & mask)));
 }
 
-static void phyConfig(uintptr_t mdio, uint32_t phy)
+static void phyConfig(uintptr_t mdio, uint32_t phy, uint16_t delay)
 {
     uint32_t tries = 0U;
 
@@ -568,7 +638,7 @@ static void phyConfig(uintptr_t mdio, uint32_t phy)
     phyRmw(mdio, phy, PHY_CFG3, 0x0200U, 0x0200U);
     phyRmwExt(mdio, phy, DP_OP_MODE_DECODE, 0x0020U, 0U);       /* RGMII */
     phyRmwExt(mdio, phy, DP_RGMIICTL, 0x0003U, 0U);             /* 0 = clk shift on */
-    phyWriteExt(mdio, phy, DP_RGMIIDCTL, 0x0327U);              /* TX 0.75, RX 2.0 ns */
+    phyWriteExt(mdio, phy, DP_RGMIIDCTL, delay);                /* EVM: TX 0.75, RX 2.0 ns */
     phyRmw(mdio, phy, PHY_PHYCR, 0xC000U, 0x4000U);
     phyRmwExt(mdio, phy, DP_IOMUXCFG, 0x001FU, 0x001FU);        /* 35 ohm */
     phyRmw(mdio, phy, PHY_BMCR, 0x1200U, 0x1200U);
@@ -688,7 +758,14 @@ static void fwConfig(IcssgMin_Obj *h, uint32_t flowBase)
         fwPdInit(base, pdCfg[s][q][0], pdCfg[s][q][1], pdCfg[s][q][2], pdCfg[s][q][3], pdCfg[s][q][4]);
     }
 
-    /* Firmware pools: scratch, one host pool, host egress queues */
+    /* Firmware pools: scratch, one host pool, host egress queues. The CPU
+     * never touches them again, but .bss zeroing at start-up can leave dirty
+     * lines in the D-cache; evicted later, they land on frame data the
+     * firmware wrote there (zeroed 32/64 B runs in echoed 1514 B frames).
+     * Write back and invalidate the whole region before the firmware owns it. */
+    CacheP_wbInv((void *)h->fwHostPool,
+                 (uint32_t)(((uintptr_t)h->fwScratch + ICSSG_MIN_SCRATCH_SIZE) - (uintptr_t)h->fwHostPool),
+                 CacheP_TYPE_ALLD);
     REG32(dram + FW_SCRATCH_ADDR) = (uint32_t)(uintptr_t)h->fwScratch;
     REG32(dram + FW_BUF_POOL0 + (FW_HOST_POOL_IDX * 8U)) = (uint32_t)(uintptr_t)h->fwHostPool;
     REG32(dram + FW_BUF_POOL0 + (FW_HOST_POOL_IDX * 8U) + 4U) = ICSSG_MIN_HOST_POOL_SIZE;
@@ -709,6 +786,11 @@ static void fwConfig(IcssgMin_Obj *h, uint32_t flowBase)
     REG32(base + MII_G_FDB_GEN_CFG2) |= (1U << s) | (1U << 2);  /* PRUx + host FDB */
     REG32(dram + FW_HD_RAND_SEED) = 0x1234567U;
 
+    /* The dual-MAC firmware only updates parts of RXCFG, so a value left by
+     * another firmware (e.g. EtherCAT's RX_AUTO_FWD_PRE) survives a reload
+     * and corrupts every received frame. Start from the Enet LLD values. */
+    REG32(base + MII_RT_RXCFG0) = 0x213U;
+    REG32(base + MII_RT_RXCFG1) = 0x21BU;
     REG32(base + MII_RT_TXCFG0) = 0x1803U;
     REG32(base + MII_RT_TXCFG1) = 0x1903U;
     REG32(base + MII_RT_TX_IPG(1U)) = 0xBU;
@@ -768,27 +850,63 @@ int32_t IcssgMin_open(IcssgMin_Obj *h, const IcssgMin_Cfg *cfg)
     h->slice = (uint8_t)s;
     h->phyAddr = cfg->phyAddr;
 
-    status = powerOn(soc->devId);
+    /* Reset the ICSSG on its first open in this program only: a second
+     * object on the other slice must not reset the first one */
+    /* The power cycle in powerOn() resets the ICSSG end of the PSI-L links.
+     * Undo what an earlier program left first, or neither unpair nor pair
+     * works afterwards. */
+    if (gIcssgSmemInit[cfg->icssg & 1U] == 0U)
+    {
+        uint32_t k;
+
+        for (k = 0U; k < 2U; k++)
+        {
+            REG32(CHRT_CTL(TCHANRT_BASE, soc->txCh[k])) = 0U;
+            REG32(CHRT_CTL(RCHANRT_BASE, soc->rxCh[k])) = 0U;
+            psilUnpair(soc->txCh[k] + 0x1000U, soc->psilTx[k]);
+            psilUnpair(soc->psilRx[k], soc->rxCh[k] + 0x9000U);
+        }
+    }
+    status = powerOn(soc->devId, (gIcssgSmemInit[cfg->icssg & 1U] == 0U) ? 1U : 0U);
+    TRACE("power", status);
 #if (ICSSG_MIN_CORE_CLK_HZ != 0U)
     if (status == SystemP_SUCCESS)
     {
-        status = Sciclient_pmSetModuleClkFreq(soc->devId, TISCI_DEV_PRU_ICSSG1_CORE_CLK,
-                                              ICSSG_MIN_CORE_CLK_HZ,
-                                              TISCI_MSG_FLAG_CLOCK_ALLOW_FREQ_CHANGE,
-                                              SystemP_WAIT_FOREVER);
+        status = SOC_moduleSetClockFrequencyWithParent(soc->devId, TISCI_DEV_PRU_ICSSG1_CORE_CLK,
+                     TISCI_DEV_PRU_ICSSG1_CORE_CLK_PARENT_POSTDIV4_16FF_MAIN_0_HSDIVOUT9_CLK,
+                     ICSSG_MIN_CORE_CLK_HZ);
+        TRACE("core clk set", status);
+    }
+    if (status == SystemP_SUCCESS)
+    {
+        status = SOC_moduleSetClockFrequencyWithParent(soc->devId, TISCI_DEV_PRU_ICSSG1_IEP_CLK,
+                     TISCI_DEV_PRU_ICSSG1_IEP_CLK_PARENT_POSTDIV4_16FF_MAIN_0_HSDIVOUT6_CLK,
+                     ICSSG_MIN_IEP_CLK_HZ);
+        TRACE("iep clk set", status);
+    }
+#endif
+#if defined(ICSSG_MIN_TRACE)
+    {
+        uint64_t hz = 0U;
+        (void)Sciclient_pmGetModuleClkFreq(soc->devId, TISCI_DEV_PRU_ICSSG1_CORE_CLK, &hz,
+                                           SystemP_WAIT_FOREVER);
+        TRACE("core clk kHz", (int32_t)(hz / 1000U));
+        (void)Sciclient_pmGetModuleClkFreq(soc->devId, TISCI_DEV_PRU_ICSSG1_IEP_CLK, &hz,
+                                           SystemP_WAIT_FOREVER);
+        TRACE("iep clk kHz", (int32_t)(hz / 1000U));
     }
 #endif
 
     /* DMA first, like the Enet LLD (firmware starts pushing once enabled) */
     if (status == SystemP_SUCCESS)
     {
-        status  = ringInit(&h->txRing, soc->txRing[s], h->txRingMem, ICSSG_MIN_NUM_TX);
-        status |= ringInit(&h->rxRing, 112U + soc->rxFlow[s], h->rxRingMem, ICSSG_MIN_NUM_RX);
-        status |= txChInit(soc->txCh[s]);
-        status |= rxChInit(soc->rxCh[s]);
-        status |= flowInit(soc->rxFlow[s], 112U + soc->rxFlow[s]);
-        status |= psilPair(soc->txCh[s] + 0x1000U, soc->psilTx[s]);
-        status |= psilPair(soc->psilRx[s], soc->rxCh[s] + 0x9000U);
+        STEP("tx ring", ringInit(&h->txRing, soc->txRing[s], h->txRingMem, ICSSG_MIN_NUM_TX));
+        STEP("rx ring", ringInit(&h->rxRing, 112U + soc->rxFlow[s], h->rxRingMem, ICSSG_MIN_NUM_RX));
+        STEP("tx chan", txChInit(soc->txCh[s]));
+        STEP("rx chan", rxChInit(soc->rxCh[s]));
+        STEP("rx flow", flowInit(soc->rxFlow[s], 112U + soc->rxFlow[s]));
+        STEP("tx psil", psilPair(soc->txCh[s] + 0x1000U, soc->psilTx[s]));
+        STEP("rx psil", psilPair(soc->psilRx[s], soc->rxCh[s] + 0x9000U));
     }
 
     if (status == SystemP_SUCCESS)
@@ -867,7 +985,8 @@ int32_t IcssgMin_open(IcssgMin_Obj *h, const IcssgMin_Cfg *cfg)
 
         REG32(base + MDIO_BASE_OFS + MDIO_POLL_EN) = 0U;
         REG32(base + MDIO_BASE_OFS + MDIO_POLL) |= (1U << 31) | (1U << 30);
-        phyConfig(base + MDIO_BASE_OFS, h->phyAddr);
+        phyConfig(base + MDIO_BASE_OFS, h->phyAddr,
+                  (cfg->phyDelay != 0U) ? cfg->phyDelay : 0x0327U);
     }
     return status;
 }

@@ -84,6 +84,7 @@ typedef struct
     uint8_t  slice;         /* 0 = MAC port 1, 1 = MAC port 2 */
     uint8_t  phyAddr;
     uint8_t  macAddr[6];
+    uint16_t phyDelay;      /* DP83869 RGMIIDCTL value, 0 = 0x0327 (EVM) */
 } IcssgMin_Cfg;
 
 typedef struct

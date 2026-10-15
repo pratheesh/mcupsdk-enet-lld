@@ -312,6 +312,16 @@ static int32_t flowInit(uint32_t flow, uint32_t ring)
 static int32_t psilPair(uint32_t src, uint32_t dst)
 {
     struct tisci_msg_rm_psil_pair_req req;
+    struct tisci_msg_rm_psil_unpair_req unpair;
+
+    /* A pairing outlives the program that made it (a reload from the
+     * debugger keeps the system firmware running), and pairing twice fails:
+     * drop any old pairing first. */
+    memset(&unpair, 0, sizeof(unpair));
+    unpair.nav_id     = NAV_PSIL;
+    unpair.src_thread = src;
+    unpair.dst_thread = dst;
+    (void)Sciclient_rmPsilUnpair(&unpair, SystemP_WAIT_FOREVER);
 
     memset(&req, 0, sizeof(req));
     req.nav_id     = NAV_PSIL;
@@ -416,10 +426,16 @@ static void mdioWrite(uint32_t phy, uint32_t reg, uint16_t val)
     mdioFrameEnd();
 }
 
-/* ---- PHY (TI DP83867, as on the AM243x EVM CPSW port 1) ---------------- */
+/* ---- PHY (TI DP83867 on the AM243x EVM, DP83869 on the AM243x LP) ------- */
+
+/* PHYCR TX FIFO depth: 0 = 3, 1 = 4, 2 = 6, 3 = 8 nibbles (Enet LLD default 4) */
+#ifndef CPSW_MIN_PHY_TX_FIFO
+#define CPSW_MIN_PHY_TX_FIFO    (1U)
+#endif
 
 #define PHY_BMCR                (0x00U)
 #define PHY_BMSR                (0x01U)
+#define PHY_PHYIDR2             (0x03U)
 #define PHY_MMD_CR              (0x0DU)
 #define PHY_MMD_DR              (0x0EU)
 #define PHY_PHYCR               (0x10U)
@@ -434,6 +450,10 @@ static void mdioWrite(uint32_t phy, uint32_t reg, uint16_t val)
 #define DP_LOOPCR               (0xFEU)
 #define DP_DSPFFECFG            (0x12CU)
 #define DP_IOMUXCFG             (0x170U)
+#define DP_OP_MODE_DECODE       (0x1DFU)    /* DP83869 only */
+
+#define PHY_MODEL(id2)          (((id2) >> 4) & 0x3FU)
+#define DP83869_MODEL           (0x0FU)
 
 static uint16_t phyReadExt(uint32_t phy, uint32_t reg)
 {
@@ -480,9 +500,19 @@ static void phyConfig(uint32_t phy)
     phyRmw(phy, PHY_CTRL, 0x4000U, 0x4000U);            /* SW restart */
     phyRmw(phy, PHY_PHYCR, 0x0060U, 0x0040U);           /* auto MDI-X */
     phyRmw(phy, PHY_CFG3, 0x0200U, 0x0200U);            /* robust auto MDI-X */
-    phyRmwExt(phy, DP_RGMIICTL, 0x0083U, 0x0083U);      /* RGMII + TX/RX clk shift */
-    phyWriteExt(phy, DP_RGMIIDCTL, 0x0007U);            /* TX 0.25 ns, RX 2.0 ns */
-    phyRmw(phy, PHY_PHYCR, 0xC000U, 0x4000U);           /* TX FIFO depth 4 */
+    if (PHY_MODEL(mdioRead(phy, PHY_PHYIDR2)) == DP83869_MODEL)
+    {
+        /* Enet LLD CPSW defaults for the DP83869: the MAC adds the TX delay */
+        phyRmwExt(phy, DP_OP_MODE_DECODE, 0x0020U, 0U); /* RGMII */
+        phyRmwExt(phy, DP_RGMIICTL, 0x0003U, 0x0002U);  /* RX clk shift only */
+        phyWriteExt(phy, DP_RGMIIDCTL, 0x0311U);        /* TX 0.5 ns, RX 0.5 ns */
+    }
+    else
+    {
+        phyRmwExt(phy, DP_RGMIICTL, 0x0083U, 0x0083U);  /* RGMII + TX/RX clk shift */
+        phyWriteExt(phy, DP_RGMIIDCTL, 0x0007U);        /* TX 0.25 ns, RX 2.0 ns */
+    }
+    phyRmw(phy, PHY_PHYCR, 0xC000U, CPSW_MIN_PHY_TX_FIFO << 14);  /* TX FIFO depth */
     phyRmwExt(phy, DP_IOMUXCFG, 0x001FU, 0x001FU);      /* 35 ohm output impedance */
     phyRmw(phy, PHY_BMCR, 0x1200U, 0x1200U);            /* autoneg enable+restart */
 }
@@ -627,14 +657,41 @@ uint32_t CpswMin_poll(CpswMin_Obj *h)
     return mask;
 }
 
-uint8_t *CpswMin_getTxBuf(CpswMin_Obj *h)
+static void rxRecycle(CpswMin_Obj *h, uint32_t idx)
+{
+    CpswMin_Desc *d = &h->rxDesc[idx];
+
+    d->descInfo = DESC_WORD0;
+    d->bufInfo1 = CPSW_MIN_BUF_SIZE;
+    wbCache(d, sizeof(*d));
+    invCache(h->rxBuf[idx], CPSW_MIN_BUF_SIZE);
+    ringPush(&h->rxRing, d);
+}
+
+/* Reclaim completed TX descriptors; an RX buffer lent by CpswMin_sendRx()
+ * goes back to RX and the descriptor gets its own TX buffer again. */
+static void txReap(CpswMin_Obj *h)
 {
     CpswMin_Desc *d;
 
     while ((d = (CpswMin_Desc *)ringPop(&h->txRing)) != NULL)
     {
-        h->txFree[h->txFreeCnt++] = (uint8_t)(d - h->txDesc);
+        uint32_t i = (uint32_t)(d - h->txDesc);
+
+        if (h->txRx[i] != 0U)
+        {
+            rxRecycle(h, h->txRx[i] - 1U);
+            h->txRx[i] = 0U;
+            d->bufPtr[0] = (uint32_t)(uintptr_t)h->txBuf[i];
+            d->orgBufPtr[0] = d->bufPtr[0];
+        }
+        h->txFree[h->txFreeCnt++] = (uint8_t)i;
     }
+}
+
+uint8_t *CpswMin_getTxBuf(CpswMin_Obj *h)
+{
+    txReap(h);
     return (h->txFreeCnt != 0U) ? h->txBuf[h->txFree[--h->txFreeCnt]] : NULL;
 }
 
@@ -687,17 +744,48 @@ uint8_t *CpswMin_recv(CpswMin_Obj *h, uint32_t *len, uint32_t *macPort)
             h->rxPkts++;
         }
     }
+    if (buf == NULL)
+    {
+        txReap(h);      /* RX idle: reclaim TX, return lent RX buffers */
+    }
     return buf;
 }
 
 void CpswMin_recvDone(CpswMin_Obj *h, uint8_t *buf)
 {
-    uint32_t idx = (uint32_t)(buf - h->rxBuf[0]) / CPSW_MIN_BUF_SIZE;
-    CpswMin_Desc *d = &h->rxDesc[idx];
+    rxRecycle(h, (uint32_t)(buf - h->rxBuf[0]) / CPSW_MIN_BUF_SIZE);
+}
 
-    d->descInfo = DESC_WORD0;
-    d->bufInfo1 = CPSW_MIN_BUF_SIZE;
+int32_t CpswMin_sendRx(CpswMin_Obj *h, uint8_t *buf, uint32_t len, uint32_t macPort)
+{
+    uint32_t r = (uint32_t)(buf - h->rxBuf[0]) / CPSW_MIN_BUF_SIZE;
+    uint32_t i;
+    CpswMin_Desc *d;
+
+    if (h->txFreeCnt == 0U)
+    {
+        txReap(h);      /* normally done by CpswMin_recv() when RX is idle */
+    }
+    if ((r >= CPSW_MIN_NUM_RX) || (len > CPSW_MIN_BUF_SIZE) || (h->txFreeCnt == 0U))
+    {
+        return SystemP_FAILURE;
+    }
+    if (len < 60U)
+    {
+        memset(&buf[len], 0, 60U - len);
+        len = 60U;
+    }
+    i = h->txFree[--h->txFreeCnt];
+    h->txRx[i] = (uint8_t)(r + 1U);
+    d = &h->txDesc[i];
+    d->bufPtr[0] = (uint32_t)(uintptr_t)buf;
+    d->orgBufPtr[0] = d->bufPtr[0];
+    d->descInfo  = DESC_WORD0 | len;
+    d->srcDstTag = macPort;
+    d->bufInfo1  = len;
+    wbCache(buf, len);
     wbCache(d, sizeof(*d));
-    invCache(buf, CPSW_MIN_BUF_SIZE);
-    ringPush(&h->rxRing, d);
+    ringPush(&h->txRing, d);
+    h->txPkts++;
+    return SystemP_SUCCESS;
 }

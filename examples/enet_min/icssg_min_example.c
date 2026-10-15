@@ -32,11 +32,13 @@
 
 /*
  * icssg_min_example: PRU_ICSSG1 MAC port 1 (DP83869 at MDIO address 15 on
- * the AM243x EVM) with the icssg_min driver. Every received frame is sent
- * back to its sender, and a broadcast test frame goes out once a second
- * while the link is up. Counters are printed every 5 seconds.
+ * the AM243x EVM, and on jack J18 of the AM243x LP) with the icssg_min
+ * driver. Every received frame is sent back to its sender, and a broadcast
+ * test frame goes out once a second while the link is up. Counters are
+ * printed every 5 seconds.
  *
- * Build with -DICSSG_MIN_SLICES=1 so only the slice 0 firmware is linked.
+ * ICSSG_MIN_SLICES is a slice bitmask: the EVM builds link only the slice 0
+ * firmware (1), the LP builds only the slice 1 firmware (2).
  */
 
 #include <string.h>
@@ -48,25 +50,34 @@
 
 #define TEST_ETHERTYPE      (0x88B5U)   /* IEEE local experimental */
 
-/* ICSSG1 MDIO + RGMII1 on the AM243x EVM (values from the Enet SysConfig
- * output). RGMII2 would be the same pins on PRG1_PRU1. */
+/* ICSSG1 MDIO + the RGMII port of the DP83869 at MDIO address 15 (values
+ * from the Enet SysConfig output). That PHY is on RGMII1 (slice 0) on the
+ * AM243x EVM and on RGMII2 (slice 1, jack J18) on the AM243x LP; RGMII2 uses
+ * the same pins on PRG1_PRU1. */
+#if defined(ENET_MIN_BOARD_AM243X_LP)
+#define SLICE               (1U)
+#define RGMII_PIN(n)        PIN_PRG1_PRU1_GPO##n
+#else
+#define SLICE               (0U)
+#define RGMII_PIN(n)        PIN_PRG1_PRU0_GPO##n
+#endif
 #define RGMII_IN            (PIN_MODE(2) | PIN_INPUT_ENABLE | PIN_PULL_DISABLE)
 static const Pinmux_PerCfg_t gIcssgPins[] =
 {
     { PIN_PRG1_MDIO0_MDC,  PIN_MODE(0) | PIN_PULL_DISABLE },                     /* MDC   */
     { PIN_PRG1_MDIO0_MDIO, PIN_MODE(0) | PIN_INPUT_ENABLE | PIN_PULL_DISABLE },  /* MDIO  */
-    { PIN_PRG1_PRU0_GPO0,  RGMII_IN },                                           /* RD0   */
-    { PIN_PRG1_PRU0_GPO1,  RGMII_IN },                                           /* RD1   */
-    { PIN_PRG1_PRU0_GPO2,  RGMII_IN },                                           /* RD2   */
-    { PIN_PRG1_PRU0_GPO3,  RGMII_IN },                                           /* RD3   */
-    { PIN_PRG1_PRU0_GPO6,  RGMII_IN },                                           /* RXC   */
-    { PIN_PRG1_PRU0_GPO4,  RGMII_IN },                                           /* RX_CTL*/
-    { PIN_PRG1_PRU0_GPO11, RGMII_IN },                                           /* TD0   */
-    { PIN_PRG1_PRU0_GPO12, RGMII_IN },                                           /* TD1   */
-    { PIN_PRG1_PRU0_GPO13, RGMII_IN },                                           /* TD2   */
-    { PIN_PRG1_PRU0_GPO14, RGMII_IN },                                           /* TD3   */
-    { PIN_PRG1_PRU0_GPO16, RGMII_IN },                                           /* TXC   */
-    { PIN_PRG1_PRU0_GPO15, RGMII_IN },                                           /* TX_CTL*/
+    { RGMII_PIN(0),        RGMII_IN },                                           /* RD0   */
+    { RGMII_PIN(1),        RGMII_IN },                                           /* RD1   */
+    { RGMII_PIN(2),        RGMII_IN },                                           /* RD2   */
+    { RGMII_PIN(3),        RGMII_IN },                                           /* RD3   */
+    { RGMII_PIN(6),        RGMII_IN },                                           /* RXC   */
+    { RGMII_PIN(4),        RGMII_IN },                                           /* RX_CTL*/
+    { RGMII_PIN(11),       RGMII_IN },                                           /* TD0   */
+    { RGMII_PIN(12),       RGMII_IN },                                           /* TD1   */
+    { RGMII_PIN(13),       RGMII_IN },                                           /* TD2   */
+    { RGMII_PIN(14),       RGMII_IN },                                           /* TD3   */
+    { RGMII_PIN(16),       RGMII_IN },                                           /* TXC   */
+    { RGMII_PIN(15),       RGMII_IN },                                           /* TX_CTL*/
     { PINMUX_END, 0U }
 };
 
@@ -75,9 +86,12 @@ static IcssgMin_Obj gIcssg;
 static const IcssgMin_Cfg gIcssgCfg =
 {
     .icssg   = 1U,
-    .slice   = 0U,
+    .slice   = SLICE,
     .phyAddr = 15U,
     .macAddr = { 0x02U, 0x00U, 0x00U, 0x00U, 0x16U, 0x01U },
+#if defined(ENET_MIN_BOARD_AM243X_LP)
+    .phyDelay = 0x0311U,    /* TX 0.5 ns, RX 0.5 ns (Enet LLD LP default) */
+#endif
 };
 
 static void sendTest(IcssgMin_Obj *h, uint32_t seq)
@@ -110,7 +124,8 @@ static void echo(IcssgMin_Obj *h, const uint8_t *rx, uint32_t len)
 
 void icssg_min_example_main(void *args)
 {
-    uint64_t now, nextPoll = 0U, nextTest = 0U, nextLog = 0U;
+    uint64_t now, nextPoll = 0U, nextTest = 0U, nextLog = 0U, lastRx = 0U;
+    uint32_t lastRxPkts = 0U;
     uint32_t link = 0U, seq = 0U, len;
     uint8_t *rx;
 
@@ -154,7 +169,15 @@ void icssg_min_example_main(void *args)
             nextTest = now + 1000000U;
         }
 
-        if (now >= nextLog)
+        /* Counters only once RX has been quiet for 1 s: the SDK UART log
+         * blocks until the line is out (about 0.4 ms), long enough for a
+         * line-rate burst to overrun the RX ring. */
+        if (gIcssg.rxPkts != lastRxPkts)
+        {
+            lastRxPkts = gIcssg.rxPkts;
+            lastRx = now;
+        }
+        if ((now >= nextLog) && ((now - lastRx) >= 1000000U))
         {
             DebugP_log("icssg_min: tx %u rx %u rxErr %u\r\n",
                        gIcssg.txPkts, gIcssg.rxPkts, gIcssg.rxErrs);
