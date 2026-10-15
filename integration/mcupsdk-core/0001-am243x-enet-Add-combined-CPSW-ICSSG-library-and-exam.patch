@@ -1,0 +1,1569 @@
+From e72a2c224d1334b041d648dd7c9d34b7f0ae694a Mon Sep 17 00:00:00 2001
+From: tmp <tmp@x>
+Date: Sat, 26 Sep 2026 16:51:09 +0000
+Subject: [PATCH] am243x: enet: Add combined CPSW + ICSSG library and example
+
+Add the enet-cpsw-icssg library for AM243x R5F. It builds the Enet LLD
+with both ENET_ENABLE_PER_CPSW and ENET_ENABLE_PER_ICSSG so one core
+can open CPSW and ICSSG peripherals at the same time. The file list is
+the union of enet-cpsw and enet-icssg plus enet_ioctl_register_multi.c,
+which dispatches the IOCTL registration shared by both families.
+
+Register the library and the enet_layer2_icssg_cpsw example (AM243x
+EVM) with the build-file generator, and add the generated makefiles.
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01DbJ6cEKniwyDR9YBttBJEK
+---
+ .metadata/.tirex/am243x.content.tirex.json    |  37 +++
+ .project/device/project_am243x.js             |   2 +
+ makefile.am243x                               |  33 ++-
+ makefile_projectspec.am243x                   |  13 +
+ .../.project/project_am243x_cpsw_icssg.js     | 219 +++++++++++++++
+ .../enet/.project/project_cpsw_icssg.js       |  14 +
+ ...e.cpsw_icssg.am243x.r5f.gcc-armv7.freertos | 236 +++++++++++++++++
+ ...ile.cpsw_icssg.am243x.r5f.gcc-armv7.nortos | 233 ++++++++++++++++
+ ...psw_icssg.am243x.r5f.ti-arm-clang.freertos | 249 ++++++++++++++++++
+ ....cpsw_icssg.am243x.r5f.ti-arm-clang.nortos | 246 +++++++++++++++++
+ 10 files changed, 1279 insertions(+), 3 deletions(-)
+ create mode 100644 source/networking/enet/.project/project_am243x_cpsw_icssg.js
+ create mode 100644 source/networking/enet/.project/project_cpsw_icssg.js
+ create mode 100644 source/networking/enet/makefile.cpsw_icssg.am243x.r5f.gcc-armv7.freertos
+ create mode 100644 source/networking/enet/makefile.cpsw_icssg.am243x.r5f.gcc-armv7.nortos
+ create mode 100644 source/networking/enet/makefile.cpsw_icssg.am243x.r5f.ti-arm-clang.freertos
+ create mode 100644 source/networking/enet/makefile.cpsw_icssg.am243x.r5f.ti-arm-clang.nortos
+
+diff --git a/.metadata/.tirex/am243x.content.tirex.json b/.metadata/.tirex/am243x.content.tirex.json
+index 0f2951746..f3d746cd2 100644
+--- a/.metadata/.tirex/am243x.content.tirex.json
++++ b/.metadata/.tirex/am243x.content.tirex.json
+@@ -16485,6 +16485,43 @@
+             ]
+         ]
+     },
++    {
++        "resourceType": "project.ccs",
++        "resourceClass": [
++            "example"
++        ],
++        "resourceSubClass": [
++            "example.general"
++        ],
++        "description": "A Enet Layer2 Icssg Cpsw Example. CPU is R5FSS0-0 running FREERTOS.",
++        "name": "enet_layer2_icssg_cpsw",
++        "location": "../../source/networking/enet/core/examples/enet_layer2_icssg_cpsw/am243x-evm/r5fss0-0_freertos/ti-arm-clang/example.projectspec",
++        "devtools": [
++            "TMDS243EVM"
++        ],
++        "kernel": [
++            "freertos"
++        ],
++        "compiler": [
++            "ticlang"
++        ],
++        "subCategories": [
++            "..",
++            "source",
++            "networking",
++            "enet",
++            "core",
++            "examples",
++            "enet_layer2_icssg_cpsw",
++            "r5fss0-0_freertos"
++        ],
++        "mainCategories": [
++            [
++                "Examples",
++                "Development Tools"
++            ]
++        ]
++    },
+     {
+         "resourceType": "project.ccs",
+         "resourceClass": [
+diff --git a/.project/device/project_am243x.js b/.project/device/project_am243x.js
+index ca4f22683..c9baa8087 100644
+--- a/.project/device/project_am243x.js
++++ b/.project/device/project_am243x.js
+@@ -30,6 +30,7 @@ const component_file_list = [
+     "source/networking/enet/.project/project_icssg_lwipif_freertos.js",
+     "source/networking/enet/.project/project_icssg_lwipif_nortos.js",
+     "source/networking/enet/.project/project_icssg.js",
++    "source/networking/enet/.project/project_cpsw_icssg.js",
+     "source/networking/icss_emac_lld/icss_emac/.project/project.js",
+     "source/networking/icss_emac_lld/icss_emac/lwipif/.project/project.js",
+     "source/networking/icss_emac_lld/icss_timesync/.project/project.js",
+@@ -231,6 +232,7 @@ const example_file_list = [
+     "source/networking/enet/core/examples/enet_icssg_tas/.project/project.js",
+     "source/networking/enet/core/examples/enet_layer2_icssg/icssg_layer2_dualmac/.project/project.js",
+     "source/networking/enet/core/examples/enet_layer2_icssg/icssg_layer2_switch/.project/project.js",
++    "source/networking/enet/core/examples/enet_layer2_icssg_cpsw/.project/project.js",
+     "source/networking/enet/core/examples/enet_vlan_icssg/.project/project.js",
+     "source/networking/enet/core/examples/lwip/enet_icssg_tcpserver/.project/project.js",
+     "source/networking/enet/core/examples/lwip/enet_lwip_icssg/.project/project.js",
+diff --git a/makefile.am243x b/makefile.am243x
+index a9b1d959e..1ad6e5975 100644
+--- a/makefile.am243x
++++ b/makefile.am243x
+@@ -59,6 +59,7 @@ help:
+ 	@echo  $(MAKE) -s -f makefile.am243x lwipif-cpsw-nortos_r5f.ti-arm-clang
+ 	@echo  $(MAKE) -s -f makefile.am243x lwipif-icssg-freertos_r5f.ti-arm-clang
+ 	@echo  $(MAKE) -s -f makefile.am243x lwipif-icssg-nortos_r5f.ti-arm-clang
++	@echo  $(MAKE) -s -f makefile.am243x enet-cpsw-icssg_r5f.ti-arm-clang.nortos enet-cpsw-icssg_r5f.ti-arm-clang.freertos
+ 	@echo  $(MAKE) -s -f makefile.am243x enet-icssg_r5f.ti-arm-clang.nortos enet-icssg_r5f.ti-arm-clang.freertos
+ 	@echo  $(MAKE) -s -f makefile.am243x icss_emac_r5f.ti-arm-clang.nortos icss_emac_r5f.ti-arm-clang.freertos
+ 	@echo  $(MAKE) -s -f makefile.am243x icss_emac_lwip_if_r5f.ti-arm-clang.nortos icss_emac_lwip_if_r5f.ti-arm-clang.freertos
+@@ -102,6 +103,7 @@ help:
+ 	@echo  $(MAKE) -s -f makefile.am243x usbd_tusb_rndis_nortos_r5f.ti-arm-clang_clean
+ 	@echo  $(MAKE) -s -f makefile.am243x usbd_tusb_rndis_freertos_r5f.ti-arm-clang_clean
+ 	@echo  $(MAKE) -s -f makefile.am243x enet-cpsw_r5f.ti-arm-clang.nortos_clean enet-cpsw_r5f.ti-arm-clang.freertos_clean
++	@echo  $(MAKE) -s -f makefile.am243x enet-cpsw-icssg_r5f.ti-arm-clang.nortos_clean enet-cpsw-icssg_r5f.ti-arm-clang.freertos_clean
+ 	@echo  $(MAKE) -s -f makefile.am243x lwipif-cpsw-freertos_r5f.ti-arm-clang_clean
+ 	@echo  $(MAKE) -s -f makefile.am243x lwipif-cpsw-nortos_r5f.ti-arm-clang_clean
+ 	@echo  $(MAKE) -s -f makefile.am243x lwipif-icssg-freertos_r5f.ti-arm-clang_clean
+@@ -526,6 +528,7 @@ help:
+ 	@echo  $(MAKE) -s -C source/networking/enet/core/examples/enet_layer2_icssg/icssg_layer2_dualmac/am243x-lp/r5fss0-0_freertos/ti-arm-clang [all clean syscfg-gui syscfg]
+ 	@echo  $(MAKE) -s -C source/networking/enet/core/examples/enet_layer2_icssg/icssg_layer2_switch/am243x-evm/r5fss0-0_freertos/ti-arm-clang [all clean syscfg-gui syscfg]
+ 	@echo  $(MAKE) -s -C source/networking/enet/core/examples/enet_layer2_icssg/icssg_layer2_switch/am243x-lp/r5fss0-0_freertos/ti-arm-clang [all clean syscfg-gui syscfg]
++	@echo  $(MAKE) -s -C source/networking/enet/core/examples/enet_layer2_icssg_cpsw/am243x-evm/r5fss0-0_freertos/ti-arm-clang [all clean syscfg-gui syscfg]
+ 	@echo  $(MAKE) -s -C source/networking/enet/core/examples/enet_vlan_icssg/am243x-evm/r5fss0-0_freertos/ti-arm-clang [all clean syscfg-gui syscfg]
+ 	@echo  $(MAKE) -s -C source/networking/enet/core/examples/enet_vlan_icssg/am243x-lp/r5fss0-0_freertos/ti-arm-clang [all clean syscfg-gui syscfg]
+ 	@echo  $(MAKE) -s -C source/networking/enet/core/examples/lwip/enet_icssg_tcpserver/am243x-evm/r5fss0-0_freertos/ti-arm-clang [all clean syscfg-gui syscfg]
+@@ -644,6 +647,7 @@ BUILD_COMBO_lwipif-cpsw-freertos = lwipif-cpsw-freertos_r5f.ti-arm-clang
+ BUILD_COMBO_lwipif-cpsw-nortos = lwipif-cpsw-nortos_r5f.ti-arm-clang
+ BUILD_COMBO_lwipif-icssg-freertos = lwipif-icssg-freertos_r5f.ti-arm-clang
+ BUILD_COMBO_lwipif-icssg-nortos = lwipif-icssg-nortos_r5f.ti-arm-clang
++BUILD_COMBO_enet-cpsw-icssg = enet-cpsw-icssg_r5f.ti-arm-clang.nortos enet-cpsw-icssg_r5f.ti-arm-clang.freertos
+ BUILD_COMBO_enet-icssg = enet-icssg_r5f.ti-arm-clang.nortos enet-icssg_r5f.ti-arm-clang.freertos
+ BUILD_COMBO_icss_emac = icss_emac_r5f.ti-arm-clang.nortos icss_emac_r5f.ti-arm-clang.freertos
+ BUILD_COMBO_icss_emac_lwip_if = icss_emac_lwip_if_r5f.ti-arm-clang.nortos icss_emac_lwip_if_r5f.ti-arm-clang.freertos
+@@ -663,7 +667,7 @@ BUILD_COMBO_tsn_unibase-freertos = tsn_unibase-freertos_r5f.ti-arm-clang
+ 
+ 
+ # Combine all Components
+-BUILD_COMBO_ALL = $(BUILD_COMBO_board) $(BUILD_COMBO_drivers) $(BUILD_COMBO_freeRTOS_fat-freertos) $(BUILD_COMBO_freeRTOS_fat-nortos) $(BUILD_COMBO_littlefs) $(BUILD_COMBO_middleware) $(BUILD_COMBO_sdl) $(BUILD_COMBO_nortos) $(BUILD_COMBO_freertos) $(BUILD_COMBO_mathlib) $(BUILD_COMBO_pru_ipc) $(BUILD_COMBO_security) $(BUILD_COMBO_usbd_cdn_nortos) $(BUILD_COMBO_usbd_cdn_freertos) $(BUILD_COMBO_usbd_tusb_cdc_nortos) $(BUILD_COMBO_usbd_tusb_cdc_freertos) $(BUILD_COMBO_usbd_tusb_dfu_nortos) $(BUILD_COMBO_usbd_tusb_dfu_freertos) $(BUILD_COMBO_usbd_tusb_ncm_nortos) $(BUILD_COMBO_usbd_tusb_ncm_freertos) $(BUILD_COMBO_usbd_tusb_rndis_nortos) $(BUILD_COMBO_usbd_tusb_rndis_freertos) $(BUILD_COMBO_enet-cpsw) $(BUILD_COMBO_lwipif-cpsw-freertos) $(BUILD_COMBO_lwipif-cpsw-nortos) $(BUILD_COMBO_lwipif-icssg-freertos) $(BUILD_COMBO_lwipif-icssg-nortos) $(BUILD_COMBO_enet-icssg) $(BUILD_COMBO_icss_emac) $(BUILD_COMBO_icss_emac_lwip_if) $(BUILD_COMBO_icss_timesync) $(BUILD_COMBO_lwip-freertos) $(BUILD_COMBO_lwip-nortos) $(BUILD_COMBO_lwip-contrib-freertos) $(BUILD_COMBO_lwip-contrib-nortos) $(BUILD_COMBO_lwipif-ic-freertos) $(BUILD_COMBO_mbedtls) $(BUILD_COMBO_tsn_gptp-freertos) $(BUILD_COMBO_tsn_icssg_gptp-freertos) $(BUILD_COMBO_tsn_icssg_combase-freertos) $(BUILD_COMBO_tsn_combase-freertos) $(BUILD_COMBO_tsn_uniconf-freertos) $(BUILD_COMBO_tsn_unibase-freertos)
++BUILD_COMBO_ALL = $(BUILD_COMBO_board) $(BUILD_COMBO_drivers) $(BUILD_COMBO_freeRTOS_fat-freertos) $(BUILD_COMBO_freeRTOS_fat-nortos) $(BUILD_COMBO_littlefs) $(BUILD_COMBO_middleware) $(BUILD_COMBO_sdl) $(BUILD_COMBO_nortos) $(BUILD_COMBO_freertos) $(BUILD_COMBO_mathlib) $(BUILD_COMBO_pru_ipc) $(BUILD_COMBO_security) $(BUILD_COMBO_usbd_cdn_nortos) $(BUILD_COMBO_usbd_cdn_freertos) $(BUILD_COMBO_usbd_tusb_cdc_nortos) $(BUILD_COMBO_usbd_tusb_cdc_freertos) $(BUILD_COMBO_usbd_tusb_dfu_nortos) $(BUILD_COMBO_usbd_tusb_dfu_freertos) $(BUILD_COMBO_usbd_tusb_ncm_nortos) $(BUILD_COMBO_usbd_tusb_ncm_freertos) $(BUILD_COMBO_usbd_tusb_rndis_nortos) $(BUILD_COMBO_usbd_tusb_rndis_freertos) $(BUILD_COMBO_enet-cpsw) $(BUILD_COMBO_lwipif-cpsw-freertos) $(BUILD_COMBO_lwipif-cpsw-nortos) $(BUILD_COMBO_lwipif-icssg-freertos) $(BUILD_COMBO_lwipif-icssg-nortos) $(BUILD_COMBO_enet-icssg) $(BUILD_COMBO_enet-cpsw-icssg) $(BUILD_COMBO_icss_emac) $(BUILD_COMBO_icss_emac_lwip_if) $(BUILD_COMBO_icss_timesync) $(BUILD_COMBO_lwip-freertos) $(BUILD_COMBO_lwip-nortos) $(BUILD_COMBO_lwip-contrib-freertos) $(BUILD_COMBO_lwip-contrib-nortos) $(BUILD_COMBO_lwipif-ic-freertos) $(BUILD_COMBO_mbedtls) $(BUILD_COMBO_tsn_gptp-freertos) $(BUILD_COMBO_tsn_icssg_gptp-freertos) $(BUILD_COMBO_tsn_icssg_combase-freertos) $(BUILD_COMBO_tsn_combase-freertos) $(BUILD_COMBO_tsn_uniconf-freertos) $(BUILD_COMBO_tsn_unibase-freertos)
+ 
+ 
+ # Combine all Pre-built Components
+@@ -776,6 +780,9 @@ $(BUILD_COMBO_icss_emac_lwip_if):
+ $(BUILD_COMBO_icss_timesync):
+ 	$(MAKE) -C source/networking/icss_emac_lld/icss_timesync -f makefile.am243x.$(subst icss_timesync_,,$@) all
+ 
++$(BUILD_COMBO_enet-cpsw-icssg):
++	$(MAKE) -C source/networking/enet -f makefile.cpsw_icssg.am243x.$(subst enet-cpsw-icssg_,,$@) all
++
+ $(BUILD_COMBO_lwip-freertos):
+ 	$(MAKE) -C source/networking/lwip -f makefile.stack_freertos.am243x.$(subst lwip-freertos_,,$@) all
+ 
+@@ -843,6 +850,7 @@ BUILD_COMBO_CLEAN_lwipif-cpsw-freertos = lwipif-cpsw-freertos_r5f.ti-arm-clang_c
+ BUILD_COMBO_CLEAN_lwipif-cpsw-nortos = lwipif-cpsw-nortos_r5f.ti-arm-clang_clean
+ BUILD_COMBO_CLEAN_lwipif-icssg-freertos = lwipif-icssg-freertos_r5f.ti-arm-clang_clean
+ BUILD_COMBO_CLEAN_lwipif-icssg-nortos = lwipif-icssg-nortos_r5f.ti-arm-clang_clean
++BUILD_COMBO_CLEAN_enet-cpsw-icssg = enet-cpsw-icssg_r5f.ti-arm-clang.nortos_clean enet-cpsw-icssg_r5f.ti-arm-clang.freertos_clean
+ BUILD_COMBO_CLEAN_enet-icssg = enet-icssg_r5f.ti-arm-clang.nortos_clean enet-icssg_r5f.ti-arm-clang.freertos_clean
+ BUILD_COMBO_CLEAN_icss_emac = icss_emac_r5f.ti-arm-clang.nortos_clean icss_emac_r5f.ti-arm-clang.freertos_clean
+ BUILD_COMBO_CLEAN_icss_emac_lwip_if = icss_emac_lwip_if_r5f.ti-arm-clang.nortos_clean icss_emac_lwip_if_r5f.ti-arm-clang.freertos_clean
+@@ -862,7 +870,7 @@ BUILD_COMBO_CLEAN_tsn_unibase-freertos = tsn_unibase-freertos_r5f.ti-arm-clang_c
+ 
+ 
+ # Combine all Components Clean
+-BUILD_COMBO_CLEAN_ALL = $(BUILD_COMBO_CLEAN_board) $(BUILD_COMBO_CLEAN_drivers) $(BUILD_COMBO_CLEAN_freeRTOS_fat-freertos) $(BUILD_COMBO_CLEAN_freeRTOS_fat-nortos) $(BUILD_COMBO_CLEAN_littlefs) $(BUILD_COMBO_CLEAN_middleware) $(BUILD_COMBO_CLEAN_sdl) $(BUILD_COMBO_CLEAN_nortos) $(BUILD_COMBO_CLEAN_freertos) $(BUILD_COMBO_CLEAN_mathlib) $(BUILD_COMBO_CLEAN_pru_ipc) $(BUILD_COMBO_CLEAN_security) $(BUILD_COMBO_CLEAN_usbd_cdn_nortos) $(BUILD_COMBO_CLEAN_usbd_cdn_freertos) $(BUILD_COMBO_CLEAN_usbd_tusb_cdc_nortos) $(BUILD_COMBO_CLEAN_usbd_tusb_cdc_freertos) $(BUILD_COMBO_CLEAN_usbd_tusb_dfu_nortos) $(BUILD_COMBO_CLEAN_usbd_tusb_dfu_freertos) $(BUILD_COMBO_CLEAN_usbd_tusb_ncm_nortos) $(BUILD_COMBO_CLEAN_usbd_tusb_ncm_freertos) $(BUILD_COMBO_CLEAN_usbd_tusb_rndis_nortos) $(BUILD_COMBO_CLEAN_usbd_tusb_rndis_freertos) $(BUILD_COMBO_CLEAN_enet-cpsw) $(BUILD_COMBO_CLEAN_lwipif-cpsw-freertos) $(BUILD_COMBO_CLEAN_lwipif-cpsw-nortos) $(BUILD_COMBO_CLEAN_lwipif-icssg-freertos) $(BUILD_COMBO_CLEAN_lwipif-icssg-nortos) $(BUILD_COMBO_CLEAN_enet-icssg) $(BUILD_COMBO_CLEAN_icss_emac) $(BUILD_COMBO_CLEAN_icss_emac_lwip_if) $(BUILD_COMBO_CLEAN_icss_timesync) $(BUILD_COMBO_CLEAN_lwip-freertos) $(BUILD_COMBO_CLEAN_lwip-nortos) $(BUILD_COMBO_CLEAN_lwip-contrib-freertos) $(BUILD_COMBO_CLEAN_lwip-contrib-nortos) $(BUILD_COMBO_CLEAN_lwipif-ic-freertos) $(BUILD_COMBO_CLEAN_mbedtls) $(BUILD_COMBO_CLEAN_tsn_gptp-freertos) $(BUILD_COMBO_CLEAN_tsn_icssg_gptp-freertos) $(BUILD_COMBO_CLEAN_tsn_icssg_combase-freertos) $(BUILD_COMBO_CLEAN_tsn_combase-freertos) $(BUILD_COMBO_CLEAN_tsn_uniconf-freertos) $(BUILD_COMBO_CLEAN_tsn_unibase-freertos)
++BUILD_COMBO_CLEAN_ALL = $(BUILD_COMBO_CLEAN_board) $(BUILD_COMBO_CLEAN_drivers) $(BUILD_COMBO_CLEAN_freeRTOS_fat-freertos) $(BUILD_COMBO_CLEAN_freeRTOS_fat-nortos) $(BUILD_COMBO_CLEAN_littlefs) $(BUILD_COMBO_CLEAN_middleware) $(BUILD_COMBO_CLEAN_sdl) $(BUILD_COMBO_CLEAN_nortos) $(BUILD_COMBO_CLEAN_freertos) $(BUILD_COMBO_CLEAN_mathlib) $(BUILD_COMBO_CLEAN_pru_ipc) $(BUILD_COMBO_CLEAN_security) $(BUILD_COMBO_CLEAN_usbd_cdn_nortos) $(BUILD_COMBO_CLEAN_usbd_cdn_freertos) $(BUILD_COMBO_CLEAN_usbd_tusb_cdc_nortos) $(BUILD_COMBO_CLEAN_usbd_tusb_cdc_freertos) $(BUILD_COMBO_CLEAN_usbd_tusb_dfu_nortos) $(BUILD_COMBO_CLEAN_usbd_tusb_dfu_freertos) $(BUILD_COMBO_CLEAN_usbd_tusb_ncm_nortos) $(BUILD_COMBO_CLEAN_usbd_tusb_ncm_freertos) $(BUILD_COMBO_CLEAN_usbd_tusb_rndis_nortos) $(BUILD_COMBO_CLEAN_usbd_tusb_rndis_freertos) $(BUILD_COMBO_CLEAN_enet-cpsw) $(BUILD_COMBO_CLEAN_lwipif-cpsw-freertos) $(BUILD_COMBO_CLEAN_lwipif-cpsw-nortos) $(BUILD_COMBO_CLEAN_lwipif-icssg-freertos) $(BUILD_COMBO_CLEAN_lwipif-icssg-nortos) $(BUILD_COMBO_CLEAN_enet-icssg) $(BUILD_COMBO_CLEAN_enet-cpsw-icssg) $(BUILD_COMBO_CLEAN_icss_emac) $(BUILD_COMBO_CLEAN_icss_emac_lwip_if) $(BUILD_COMBO_CLEAN_icss_timesync) $(BUILD_COMBO_CLEAN_lwip-freertos) $(BUILD_COMBO_CLEAN_lwip-nortos) $(BUILD_COMBO_CLEAN_lwip-contrib-freertos) $(BUILD_COMBO_CLEAN_lwip-contrib-nortos) $(BUILD_COMBO_CLEAN_lwipif-ic-freertos) $(BUILD_COMBO_CLEAN_mbedtls) $(BUILD_COMBO_CLEAN_tsn_gptp-freertos) $(BUILD_COMBO_CLEAN_tsn_icssg_gptp-freertos) $(BUILD_COMBO_CLEAN_tsn_icssg_combase-freertos) $(BUILD_COMBO_CLEAN_tsn_combase-freertos) $(BUILD_COMBO_CLEAN_tsn_uniconf-freertos) $(BUILD_COMBO_CLEAN_tsn_unibase-freertos)
+ 
+ 
+ # Combine all Pre-built Components Clean
+@@ -969,6 +977,9 @@ $(BUILD_COMBO_CLEAN_icss_emac_lwip_if):
+ $(BUILD_COMBO_CLEAN_icss_timesync):
+ 	$(MAKE) -C source/networking/icss_emac_lld/icss_timesync -f makefile.am243x.$(subst icss_timesync_,,$(subst _clean,,$@)) clean
+ 
++$(BUILD_COMBO_CLEAN_enet-cpsw-icssg):
++	$(MAKE) -C source/networking/enet -f makefile.cpsw_icssg.am243x.$(subst enet-cpsw-icssg_,,$(subst _clean,,$@)) clean
++
+ $(BUILD_COMBO_CLEAN_lwip-freertos):
+ 	$(MAKE) -C source/networking/lwip -f makefile.stack_freertos.am243x.$(subst lwip-freertos_,,$(subst _clean,,$@)) clean
+ 
+@@ -1036,6 +1047,7 @@ BUILD_COMBO_SCRUB_lwipif-cpsw-freertos = lwipif-cpsw-freertos_r5f.ti-arm-clang_s
+ BUILD_COMBO_SCRUB_lwipif-cpsw-nortos = lwipif-cpsw-nortos_r5f.ti-arm-clang_scrub
+ BUILD_COMBO_SCRUB_lwipif-icssg-freertos = lwipif-icssg-freertos_r5f.ti-arm-clang_scrub
+ BUILD_COMBO_SCRUB_lwipif-icssg-nortos = lwipif-icssg-nortos_r5f.ti-arm-clang_scrub
++BUILD_COMBO_SCRUB_enet-cpsw-icssg = enet-cpsw-icssg_r5f.ti-arm-clang.nortos_scrub enet-cpsw-icssg_r5f.ti-arm-clang.freertos_scrub
+ BUILD_COMBO_SCRUB_enet-icssg = enet-icssg_r5f.ti-arm-clang.nortos_scrub enet-icssg_r5f.ti-arm-clang.freertos_scrub
+ BUILD_COMBO_SCRUB_icss_emac = icss_emac_r5f.ti-arm-clang.nortos_scrub icss_emac_r5f.ti-arm-clang.freertos_scrub
+ BUILD_COMBO_SCRUB_icss_emac_lwip_if = icss_emac_lwip_if_r5f.ti-arm-clang.nortos_scrub icss_emac_lwip_if_r5f.ti-arm-clang.freertos_scrub
+@@ -1055,7 +1067,7 @@ BUILD_COMBO_SCRUB_tsn_unibase-freertos = tsn_unibase-freertos_r5f.ti-arm-clang_s
+ 
+ 
+ # Combine all Components Scrub Targets
+-BUILD_COMBO_SCRUB_ALL = $(BUILD_COMBO_SCRUB_board) $(BUILD_COMBO_SCRUB_drivers) $(BUILD_COMBO_SCRUB_freeRTOS_fat-freertos) $(BUILD_COMBO_SCRUB_freeRTOS_fat-nortos) $(BUILD_COMBO_SCRUB_littlefs) $(BUILD_COMBO_SCRUB_middleware) $(BUILD_COMBO_SCRUB_sdl) $(BUILD_COMBO_SCRUB_nortos) $(BUILD_COMBO_SCRUB_freertos) $(BUILD_COMBO_SCRUB_mathlib) $(BUILD_COMBO_SCRUB_pru_ipc) $(BUILD_COMBO_SCRUB_security) $(BUILD_COMBO_SCRUB_usbd_cdn_nortos) $(BUILD_COMBO_SCRUB_usbd_cdn_freertos) $(BUILD_COMBO_SCRUB_usbd_tusb_cdc_nortos) $(BUILD_COMBO_SCRUB_usbd_tusb_cdc_freertos) $(BUILD_COMBO_SCRUB_usbd_tusb_dfu_nortos) $(BUILD_COMBO_SCRUB_usbd_tusb_dfu_freertos) $(BUILD_COMBO_SCRUB_usbd_tusb_ncm_nortos) $(BUILD_COMBO_SCRUB_usbd_tusb_ncm_freertos) $(BUILD_COMBO_SCRUB_usbd_tusb_rndis_nortos) $(BUILD_COMBO_SCRUB_usbd_tusb_rndis_freertos) $(BUILD_COMBO_SCRUB_enet-cpsw) $(BUILD_COMBO_SCRUB_lwipif-cpsw-freertos) $(BUILD_COMBO_SCRUB_lwipif-cpsw-nortos) $(BUILD_COMBO_SCRUB_lwipif-icssg-freertos) $(BUILD_COMBO_SCRUB_lwipif-icssg-nortos) $(BUILD_COMBO_SCRUB_enet-icssg) $(BUILD_COMBO_SCRUB_icss_emac) $(BUILD_COMBO_SCRUB_icss_emac_lwip_if) $(BUILD_COMBO_SCRUB_icss_timesync) $(BUILD_COMBO_SCRUB_lwip-freertos) $(BUILD_COMBO_SCRUB_lwip-nortos) $(BUILD_COMBO_SCRUB_lwip-contrib-freertos) $(BUILD_COMBO_SCRUB_lwip-contrib-nortos) $(BUILD_COMBO_SCRUB_lwipif-ic-freertos) $(BUILD_COMBO_SCRUB_mbedtls) $(BUILD_COMBO_SCRUB_tsn_gptp-freertos) $(BUILD_COMBO_SCRUB_tsn_icssg_gptp-freertos) $(BUILD_COMBO_SCRUB_tsn_icssg_combase-freertos) $(BUILD_COMBO_SCRUB_tsn_combase-freertos) $(BUILD_COMBO_SCRUB_tsn_uniconf-freertos) $(BUILD_COMBO_SCRUB_tsn_unibase-freertos)
++BUILD_COMBO_SCRUB_ALL = $(BUILD_COMBO_SCRUB_board) $(BUILD_COMBO_SCRUB_drivers) $(BUILD_COMBO_SCRUB_freeRTOS_fat-freertos) $(BUILD_COMBO_SCRUB_freeRTOS_fat-nortos) $(BUILD_COMBO_SCRUB_littlefs) $(BUILD_COMBO_SCRUB_middleware) $(BUILD_COMBO_SCRUB_sdl) $(BUILD_COMBO_SCRUB_nortos) $(BUILD_COMBO_SCRUB_freertos) $(BUILD_COMBO_SCRUB_mathlib) $(BUILD_COMBO_SCRUB_pru_ipc) $(BUILD_COMBO_SCRUB_security) $(BUILD_COMBO_SCRUB_usbd_cdn_nortos) $(BUILD_COMBO_SCRUB_usbd_cdn_freertos) $(BUILD_COMBO_SCRUB_usbd_tusb_cdc_nortos) $(BUILD_COMBO_SCRUB_usbd_tusb_cdc_freertos) $(BUILD_COMBO_SCRUB_usbd_tusb_dfu_nortos) $(BUILD_COMBO_SCRUB_usbd_tusb_dfu_freertos) $(BUILD_COMBO_SCRUB_usbd_tusb_ncm_nortos) $(BUILD_COMBO_SCRUB_usbd_tusb_ncm_freertos) $(BUILD_COMBO_SCRUB_usbd_tusb_rndis_nortos) $(BUILD_COMBO_SCRUB_usbd_tusb_rndis_freertos) $(BUILD_COMBO_SCRUB_enet-cpsw) $(BUILD_COMBO_SCRUB_lwipif-cpsw-freertos) $(BUILD_COMBO_SCRUB_lwipif-cpsw-nortos) $(BUILD_COMBO_SCRUB_lwipif-icssg-freertos) $(BUILD_COMBO_SCRUB_lwipif-icssg-nortos) $(BUILD_COMBO_SCRUB_enet-icssg) $(BUILD_COMBO_SCRUB_enet-cpsw-icssg) $(BUILD_COMBO_SCRUB_icss_emac) $(BUILD_COMBO_SCRUB_icss_emac_lwip_if) $(BUILD_COMBO_SCRUB_icss_timesync) $(BUILD_COMBO_SCRUB_lwip-freertos) $(BUILD_COMBO_SCRUB_lwip-nortos) $(BUILD_COMBO_SCRUB_lwip-contrib-freertos) $(BUILD_COMBO_SCRUB_lwip-contrib-nortos) $(BUILD_COMBO_SCRUB_lwipif-ic-freertos) $(BUILD_COMBO_SCRUB_mbedtls) $(BUILD_COMBO_SCRUB_tsn_gptp-freertos) $(BUILD_COMBO_SCRUB_tsn_icssg_gptp-freertos) $(BUILD_COMBO_SCRUB_tsn_icssg_combase-freertos) $(BUILD_COMBO_SCRUB_tsn_combase-freertos) $(BUILD_COMBO_SCRUB_tsn_uniconf-freertos) $(BUILD_COMBO_SCRUB_tsn_unibase-freertos)
+ 
+ # Combine all Pre-built Components Scrub Targets
+ BUILD_COMBO_PREBUILT_SCRUB_ALL = $(BUILD_COMBO_SCRUB_cmsis)
+@@ -1161,6 +1173,9 @@ $(BUILD_COMBO_SCRUB_icss_emac_lwip_if):
+ $(BUILD_COMBO_SCRUB_icss_timesync):
+ 	$(MAKE) -C source/networking/icss_emac_lld/icss_timesync -f makefile.am243x.$(subst icss_timesync_,,$(subst _scrub,,$@)) scrub
+ 
++$(BUILD_COMBO_SCRUB_enet-cpsw-icssg):
++	$(MAKE) -C source/networking/enet -f makefile.cpsw_icssg.am243x.$(subst enet-cpsw-icssg_,,$(subst _scrub,,$@)) scrub
++
+ $(BUILD_COMBO_SCRUB_lwip-freertos):
+ 	$(MAKE) -C source/networking/lwip -f makefile.stack_freertos.am243x.$(subst lwip-freertos_,,$(subst _scrub,,$@)) scrub
+ 
+@@ -1581,6 +1596,7 @@ BUILD_COMBO_EXAMPLE_ALL += icssg_layer2_dualmac_am243x-evm_r5fss0-0_freertos_ti-
+ BUILD_COMBO_EXAMPLE_ALL += icssg_layer2_dualmac_am243x-lp_r5fss0-0_freertos_ti-arm-clang
+ BUILD_COMBO_EXAMPLE_ALL += enet_layer2_icssg_am243x-evm_r5fss0-0_freertos_ti-arm-clang
+ BUILD_COMBO_EXAMPLE_ALL += enet_layer2_icssg_am243x-lp_r5fss0-0_freertos_ti-arm-clang
++BUILD_COMBO_EXAMPLE_ALL += enet_layer2_icssg_cpsw_am243x-evm_r5fss0-0_freertos_ti-arm-clang
+ BUILD_COMBO_EXAMPLE_ALL += enet_vlan_icssg_am243x-evm_r5fss0-0_freertos_ti-arm-clang
+ BUILD_COMBO_EXAMPLE_ALL += enet_vlan_icssg_am243x-lp_r5fss0-0_freertos_ti-arm-clang
+ BUILD_COMBO_EXAMPLE_ALL += enet_icssg_tcpserver_am243x-evm_r5fss0-0_freertos_ti-arm-clang
+@@ -2884,6 +2900,9 @@ examples-private: $(BUILD_COMBO_EXAMPLE_PRIVATE_ALL)
+  enet_layer2_icssg_am243x-lp_r5fss0-0_freertos_ti-arm-clang:
+ 	$(MAKE) -C source/networking/enet/core/examples/enet_layer2_icssg/icssg_layer2_switch/am243x-lp/r5fss0-0_freertos/ti-arm-clang -f makefile all
+ 
++ enet_layer2_icssg_cpsw_am243x-evm_r5fss0-0_freertos_ti-arm-clang:
++	$(MAKE) -C source/networking/enet/core/examples/enet_layer2_icssg_cpsw/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile all
++
+  enet_vlan_icssg_am243x-evm_r5fss0-0_freertos_ti-arm-clang:
+ 	$(MAKE) -C source/networking/enet/core/examples/enet_vlan_icssg/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile all
+ 
+@@ -3520,6 +3539,7 @@ BUILD_COMBO_EXAMPLE_CLEAN_ALL += icssg_layer2_dualmac_am243x-evm_r5fss0-0_freert
+ BUILD_COMBO_EXAMPLE_CLEAN_ALL += icssg_layer2_dualmac_am243x-lp_r5fss0-0_freertos_ti-arm-clang_clean
+ BUILD_COMBO_EXAMPLE_CLEAN_ALL += enet_layer2_icssg_am243x-evm_r5fss0-0_freertos_ti-arm-clang_clean
+ BUILD_COMBO_EXAMPLE_CLEAN_ALL += enet_layer2_icssg_am243x-lp_r5fss0-0_freertos_ti-arm-clang_clean
++BUILD_COMBO_EXAMPLE_CLEAN_ALL += enet_layer2_icssg_cpsw_am243x-evm_r5fss0-0_freertos_ti-arm-clang_clean
+ BUILD_COMBO_EXAMPLE_CLEAN_ALL += enet_vlan_icssg_am243x-evm_r5fss0-0_freertos_ti-arm-clang_clean
+ BUILD_COMBO_EXAMPLE_CLEAN_ALL += enet_vlan_icssg_am243x-lp_r5fss0-0_freertos_ti-arm-clang_clean
+ BUILD_COMBO_EXAMPLE_CLEAN_ALL += enet_icssg_tcpserver_am243x-evm_r5fss0-0_freertos_ti-arm-clang_clean
+@@ -4818,6 +4838,9 @@ examples-private-clean: $(BUILD_COMBO_EXAMPLE_PRIVATE_CLEAN_ALL)
+  enet_layer2_icssg_am243x-lp_r5fss0-0_freertos_ti-arm-clang_clean:
+ 	$(MAKE) -C source/networking/enet/core/examples/enet_layer2_icssg/icssg_layer2_switch/am243x-lp/r5fss0-0_freertos/ti-arm-clang -f makefile clean
+ 
++ enet_layer2_icssg_cpsw_am243x-evm_r5fss0-0_freertos_ti-arm-clang_clean:
++	$(MAKE) -C source/networking/enet/core/examples/enet_layer2_icssg_cpsw/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile clean
++
+  enet_vlan_icssg_am243x-evm_r5fss0-0_freertos_ti-arm-clang_clean:
+ 	$(MAKE) -C source/networking/enet/core/examples/enet_vlan_icssg/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile clean
+ 
+@@ -5454,6 +5477,7 @@ BUILD_COMBO_EXAMPLE_SCRUB_ALL += icssg_layer2_dualmac_am243x-evm_r5fss0-0_freert
+ BUILD_COMBO_EXAMPLE_SCRUB_ALL += icssg_layer2_dualmac_am243x-lp_r5fss0-0_freertos_ti-arm-clang_scrub
+ BUILD_COMBO_EXAMPLE_SCRUB_ALL += enet_layer2_icssg_am243x-evm_r5fss0-0_freertos_ti-arm-clang_scrub
+ BUILD_COMBO_EXAMPLE_SCRUB_ALL += enet_layer2_icssg_am243x-lp_r5fss0-0_freertos_ti-arm-clang_scrub
++BUILD_COMBO_EXAMPLE_SCRUB_ALL += enet_layer2_icssg_cpsw_am243x-evm_r5fss0-0_freertos_ti-arm-clang_scrub
+ BUILD_COMBO_EXAMPLE_SCRUB_ALL += enet_vlan_icssg_am243x-evm_r5fss0-0_freertos_ti-arm-clang_scrub
+ BUILD_COMBO_EXAMPLE_SCRUB_ALL += enet_vlan_icssg_am243x-lp_r5fss0-0_freertos_ti-arm-clang_scrub
+ BUILD_COMBO_EXAMPLE_SCRUB_ALL += enet_icssg_tcpserver_am243x-evm_r5fss0-0_freertos_ti-arm-clang_scrub
+@@ -6752,6 +6776,9 @@ examples-scrub-private: $(BUILD_COMBO_EXAMPLE_PRIVATE_SCRUB_ALL)
+  enet_layer2_icssg_am243x-lp_r5fss0-0_freertos_ti-arm-clang_scrub:
+ 	$(MAKE) -C source/networking/enet/core/examples/enet_layer2_icssg/icssg_layer2_switch/am243x-lp/r5fss0-0_freertos/ti-arm-clang -f makefile scrub
+ 
++ enet_layer2_icssg_cpsw_am243x-evm_r5fss0-0_freertos_ti-arm-clang_scrub:
++	$(MAKE) -C source/networking/enet/core/examples/enet_layer2_icssg_cpsw/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile scrub
++
+  enet_vlan_icssg_am243x-evm_r5fss0-0_freertos_ti-arm-clang_scrub:
+ 	$(MAKE) -C source/networking/enet/core/examples/enet_vlan_icssg/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile scrub
+ 
+diff --git a/makefile_projectspec.am243x b/makefile_projectspec.am243x
+index 11848b32a..72b49de75 100644
+--- a/makefile_projectspec.am243x
++++ b/makefile_projectspec.am243x
+@@ -405,6 +405,7 @@ BUILD_COMBO_EXAMPLE_PROJECTSPEC_BUILD_ALL += icssg_layer2_dualmac_am243x-evm_r5f
+ BUILD_COMBO_EXAMPLE_PROJECTSPEC_BUILD_ALL += icssg_layer2_dualmac_am243x-lp_r5fss0-0_freertos_ti-arm-clang_build
+ BUILD_COMBO_EXAMPLE_PROJECTSPEC_BUILD_ALL += enet_layer2_icssg_am243x-evm_r5fss0-0_freertos_ti-arm-clang_build
+ BUILD_COMBO_EXAMPLE_PROJECTSPEC_BUILD_ALL += enet_layer2_icssg_am243x-lp_r5fss0-0_freertos_ti-arm-clang_build
++BUILD_COMBO_EXAMPLE_PROJECTSPEC_BUILD_ALL += enet_layer2_icssg_cpsw_am243x-evm_r5fss0-0_freertos_ti-arm-clang_build
+ BUILD_COMBO_EXAMPLE_PROJECTSPEC_BUILD_ALL += enet_vlan_icssg_am243x-evm_r5fss0-0_freertos_ti-arm-clang_build
+ BUILD_COMBO_EXAMPLE_PROJECTSPEC_BUILD_ALL += enet_vlan_icssg_am243x-lp_r5fss0-0_freertos_ti-arm-clang_build
+ BUILD_COMBO_EXAMPLE_PROJECTSPEC_BUILD_ALL += enet_icssg_tcpserver_am243x-evm_r5fss0-0_freertos_ti-arm-clang_build
+@@ -1702,6 +1703,9 @@ all-private: $(BUILD_COMBO_EXAMPLE_PROJECTSPEC_BUILD_PRIVATE_ALL)
+  enet_layer2_icssg_am243x-lp_r5fss0-0_freertos_ti-arm-clang_build:
+ 	$(MAKE) -C source/networking/enet/core/examples/enet_layer2_icssg/icssg_layer2_switch/am243x-lp/r5fss0-0_freertos/ti-arm-clang -f makefile_projectspec all
+ 
++ enet_layer2_icssg_cpsw_am243x-evm_r5fss0-0_freertos_ti-arm-clang_build:
++	$(MAKE) -C source/networking/enet/core/examples/enet_layer2_icssg_cpsw/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile_projectspec all
++
+  enet_vlan_icssg_am243x-evm_r5fss0-0_freertos_ti-arm-clang_build:
+ 	$(MAKE) -C source/networking/enet/core/examples/enet_vlan_icssg/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile_projectspec all
+ 
+@@ -2359,6 +2363,7 @@ BUILD_COMBO_EXAMPLE_PROJECTSPEC_CLEAN_ALL += icssg_layer2_dualmac_am243x-evm_r5f
+ BUILD_COMBO_EXAMPLE_PROJECTSPEC_CLEAN_ALL += icssg_layer2_dualmac_am243x-lp_r5fss0-0_freertos_ti-arm-clang_clean
+ BUILD_COMBO_EXAMPLE_PROJECTSPEC_CLEAN_ALL += enet_layer2_icssg_am243x-evm_r5fss0-0_freertos_ti-arm-clang_clean
+ BUILD_COMBO_EXAMPLE_PROJECTSPEC_CLEAN_ALL += enet_layer2_icssg_am243x-lp_r5fss0-0_freertos_ti-arm-clang_clean
++BUILD_COMBO_EXAMPLE_PROJECTSPEC_CLEAN_ALL += enet_layer2_icssg_cpsw_am243x-evm_r5fss0-0_freertos_ti-arm-clang_clean
+ BUILD_COMBO_EXAMPLE_PROJECTSPEC_CLEAN_ALL += enet_vlan_icssg_am243x-evm_r5fss0-0_freertos_ti-arm-clang_clean
+ BUILD_COMBO_EXAMPLE_PROJECTSPEC_CLEAN_ALL += enet_vlan_icssg_am243x-lp_r5fss0-0_freertos_ti-arm-clang_clean
+ BUILD_COMBO_EXAMPLE_PROJECTSPEC_CLEAN_ALL += enet_icssg_tcpserver_am243x-evm_r5fss0-0_freertos_ti-arm-clang_clean
+@@ -3656,6 +3661,9 @@ clean-private: $(BUILD_COMBO_EXAMPLE_PROJECTSPEC_CLEAN_PRIVATE_ALL)
+  enet_layer2_icssg_am243x-lp_r5fss0-0_freertos_ti-arm-clang_clean:
+ 	$(MAKE) -C source/networking/enet/core/examples/enet_layer2_icssg/icssg_layer2_switch/am243x-lp/r5fss0-0_freertos/ti-arm-clang -f makefile_projectspec clean
+ 
++ enet_layer2_icssg_cpsw_am243x-evm_r5fss0-0_freertos_ti-arm-clang_clean:
++	$(MAKE) -C source/networking/enet/core/examples/enet_layer2_icssg_cpsw/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile_projectspec clean
++
+  enet_vlan_icssg_am243x-evm_r5fss0-0_freertos_ti-arm-clang_clean:
+ 	$(MAKE) -C source/networking/enet/core/examples/enet_vlan_icssg/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile_projectspec clean
+ 
+@@ -4313,6 +4321,7 @@ BUILD_COMBO_EXAMPLE_PROJECTSPEC_EXPORT_ALL += icssg_layer2_dualmac_am243x-evm_r5
+ BUILD_COMBO_EXAMPLE_PROJECTSPEC_EXPORT_ALL += icssg_layer2_dualmac_am243x-lp_r5fss0-0_freertos_ti-arm-clang_export
+ BUILD_COMBO_EXAMPLE_PROJECTSPEC_EXPORT_ALL += enet_layer2_icssg_am243x-evm_r5fss0-0_freertos_ti-arm-clang_export
+ BUILD_COMBO_EXAMPLE_PROJECTSPEC_EXPORT_ALL += enet_layer2_icssg_am243x-lp_r5fss0-0_freertos_ti-arm-clang_export
++BUILD_COMBO_EXAMPLE_PROJECTSPEC_EXPORT_ALL += enet_layer2_icssg_cpsw_am243x-evm_r5fss0-0_freertos_ti-arm-clang_export
+ BUILD_COMBO_EXAMPLE_PROJECTSPEC_EXPORT_ALL += enet_vlan_icssg_am243x-evm_r5fss0-0_freertos_ti-arm-clang_export
+ BUILD_COMBO_EXAMPLE_PROJECTSPEC_EXPORT_ALL += enet_vlan_icssg_am243x-lp_r5fss0-0_freertos_ti-arm-clang_export
+ BUILD_COMBO_EXAMPLE_PROJECTSPEC_EXPORT_ALL += enet_icssg_tcpserver_am243x-evm_r5fss0-0_freertos_ti-arm-clang_export
+@@ -5610,6 +5619,9 @@ export-private: $(BUILD_COMBO_EXAMPLE_PROJECTSPEC_EXPORT_PRIVATE_ALL)
+  enet_layer2_icssg_am243x-lp_r5fss0-0_freertos_ti-arm-clang_export:
+ 	$(MAKE) -C source/networking/enet/core/examples/enet_layer2_icssg/icssg_layer2_switch/am243x-lp/r5fss0-0_freertos/ti-arm-clang -f makefile_projectspec export
+ 
++ enet_layer2_icssg_cpsw_am243x-evm_r5fss0-0_freertos_ti-arm-clang_export:
++	$(MAKE) -C source/networking/enet/core/examples/enet_layer2_icssg_cpsw/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile_projectspec export
++
+  enet_vlan_icssg_am243x-evm_r5fss0-0_freertos_ti-arm-clang_export:
+ 	$(MAKE) -C source/networking/enet/core/examples/enet_vlan_icssg/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile_projectspec export
+ 
+@@ -6292,6 +6304,7 @@ help:
+ 	@echo  $(MAKE) -s -C source/networking/enet/core/examples/enet_layer2_icssg/icssg_layer2_dualmac/am243x-lp/r5fss0-0_freertos/ti-arm-clang -f makefile_projectspec [export all clean]
+ 	@echo  $(MAKE) -s -C source/networking/enet/core/examples/enet_layer2_icssg/icssg_layer2_switch/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile_projectspec [export all clean]
+ 	@echo  $(MAKE) -s -C source/networking/enet/core/examples/enet_layer2_icssg/icssg_layer2_switch/am243x-lp/r5fss0-0_freertos/ti-arm-clang -f makefile_projectspec [export all clean]
++	@echo  $(MAKE) -s -C source/networking/enet/core/examples/enet_layer2_icssg_cpsw/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile_projectspec [export all clean]
+ 	@echo  $(MAKE) -s -C source/networking/enet/core/examples/enet_vlan_icssg/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile_projectspec [export all clean]
+ 	@echo  $(MAKE) -s -C source/networking/enet/core/examples/enet_vlan_icssg/am243x-lp/r5fss0-0_freertos/ti-arm-clang -f makefile_projectspec [export all clean]
+ 	@echo  $(MAKE) -s -C source/networking/enet/core/examples/lwip/enet_icssg_tcpserver/am243x-evm/r5fss0-0_freertos/ti-arm-clang -f makefile_projectspec [export all clean]
+diff --git a/source/networking/enet/.project/project_am243x_cpsw_icssg.js b/source/networking/enet/.project/project_am243x_cpsw_icssg.js
+new file mode 100644
+index 000000000..ee4281682
+--- /dev/null
++++ b/source/networking/enet/.project/project_am243x_cpsw_icssg.js
+@@ -0,0 +1,219 @@
++let path = require('path');
++
++let device = "am243x";
++
++const files = {
++    common: [
++        /* Enet Core */
++        "enet.c",
++        "enet_trace.c",
++        "enet_utils.c",
++        "enet_osal.c",
++        "enet_queue.c",
++        "enet_rm.c",
++        "enet_rm_ioctl.c",
++        "enet_rm_ioctl_register.c",
++        "enet_ioctl_register_multi.c",
++        "enet_utils_dflt.c",
++        "enet_phymdio_dflt.c",
++        "enet_phymdio_dflt_ioctl.c",
++        "enet_phymdio_dflt_ioctl_register.c",
++        "mod_null.c",
++        "mdio.c",
++        "mdio_manual_ioctl.c",
++        "mdio_ioctl.c",
++        "mdio_ioctl_register.c",
++        "cpsw_macport.c",
++        "cpsw_macport_ioctl.c",
++        "cpsw_macport_ioctl_register.c",
++        "cpsw_macport_intervlan.c",
++        "cpsw_macport_intervlan_ioctl.c",
++        "cpsw_macport_intervlan_ioctl_register.c",
++        "cpsw_macport_est.c",
++        "cpsw_macport_est_ioctl.c",
++        "cpsw_hostport.c",
++        "cpsw_hostport_ioctl.c",
++        "cpsw_hostport_ioctl_register.c",
++        "cpsw_ale.c",
++        "cpsw_ale_ioctl.c",
++        "cpsw_ale_ioctl_register.c",
++        "cpsw_stats.c",
++        "cpsw_stats_ioctl.c",
++        "cpsw_stats_ioctl_register.c",
++        "cpsw_cpts.c",
++        "cpsw_cpts_ioctl.c",
++        "cpsw_cpts_ioctl_register.c",
++        "per_null.c",
++        "cpsw_intervlan.c",
++        "cpsw.c",
++        "cpsw_ioctl.c",
++        "cpsw_ioctl_register.c",
++        "cpsw_est.c",
++        "cpsw_est_ioctl.c",
++        "cpsw_est_ioctl_register.c",
++        "enet_hostport.c",
++        "enet_udma.c",
++        "enet_udma_priv.c",
++
++        /* CSL_FL for CPSW */
++        "csl_cpgmac_sl.c",
++        "csl_cpsw.c",
++        "csl_cpsw_ss.c",
++        "csl_cpsw_ale_9g_tblcfg.c",
++        "csl_cpts.c",
++        "csl_mdio.c",
++
++        /* ICSS files */
++        "icssg.c",
++        "icssg_ioctl_register.c",
++        "icssg_utils.c",
++        "icssg_timesync.c",
++        "icssg_timesync_ioctl_register.c",
++        "icssg_tas.c",
++        "icssg_tas_ioctl_register.c",
++        "icssg_stats.c",
++        "icssg_stats_ioctl_register.c",
++
++        /* SOC */
++        "k3_soc.c",
++
++        /* Enet utils */
++        "enetphy.c",
++
++        /* Enet utils */
++        "enet_apputils.c",
++        "enet_appmemutils.c",
++        "enet_appethpatterns.c",
++        "enet_udmautils.c",
++        "enet_ioctlutils.c",
++        "enet_apputils_k3.c",
++    ],
++};
++
++const filedirs = {
++    common: [
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/core",
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/mod",
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/per",
++		"${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/per/V1",
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/common",
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/dma/udma",
++
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/emac/V5/priv",
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/cpsw/V5/V5_0/priv",
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/cpsw/V5/priv",
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/cpts",
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/mdio",
++
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/soc/k3",
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/soc/k3/am64x_am243x",
++
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/phy",
++
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/core/utils",
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/core/utils/V3",
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/core/utils/defcfg",
++
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/board/src",
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/board/src/am64x_am243x_evm",
++    ],
++};
++
++const includes = {
++    common: [
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet",
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/core/utils/include",
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/core/utils/V3",
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/core",
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/core/include",
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/core/include/core",
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/core/include/phy",
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/phy",
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include",
++
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include",
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/emac/V5",
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/cpsw/V5",
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/cpsw/V5/V5_0",
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/cpts",
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/mdio",
++
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/soc/k3/am64x_am243x",
++
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/board",
++        "${MCU_PLUS_SDK_PATH}/source/networking/enet/board/src/am64x_am243x_evm/include",
++
++        "${MCU_PLUS_SDK_PATH}/source/board/ethphy/enet/rtos_drivers/include",
++    ],
++};
++
++
++const cflags = {
++    common: [
++        "-mno-unaligned-access",
++        "-Wno-extra",
++        "-fno-strict-aliasing",
++        "-Wno-error=unused-but-set-variable",
++        "-Wno-unused-but-set-variable",
++    ],
++    release: [
++        "-Oz",
++        "-flto",
++    ],
++};
++
++const defines_r5f = {
++    common: [
++        "MAKEFILE_BUILD",
++        "ENET_CFG_ASSERT=1",
++        "ENET_CFG_PRINT_ENABLE",
++        "ENET_CFG_TRACE_LEVEL=3",
++        "ENET_ENABLE_PER_CPSW=1",
++        "ENET_ENABLE_PER_ICSSG=1",
++        "ENABLE_ENET_LOG",
++    ],
++    debug: [
++        "ENET_CFG_DEV_ERROR=1",
++        "LWIPIF_INSTRUMENTATION_ENABLED=1",
++        "ENETDMA_INSTRUMENTATION_ENABLED=1",
++    ],
++};
++
++const buildOptionCombos = [
++    { device: device, cpu: "r5f", cgt: "ti-arm-clang"},
++    { device: device, cpu: "r5f", cgt: "gcc-armv7"},
++];
++
++function getComponentProperty() {
++    let property = {};
++
++    property.dirPath = path.resolve(__dirname, "..");
++    property.type = "library";
++    property.name = "enet-cpsw-icssg";
++    property.tag = "cpsw_icssg";
++    property.isInternal = false;
++    property.buildOptionCombos = buildOptionCombos;
++
++    return property;
++}
++
++function getComponentBuildProperty(buildOption) {
++    let build_property = {};
++
++    build_property.filedirs = filedirs;
++    build_property.files = files;
++    if(buildOption.cgt.match(/ti-arm-clang*/)){
++        build_property.cflags = cflags;
++    }
++    build_property.includes = includes;
++    if(buildOption.cpu.match(/r5f*/)) {
++        build_property.defines = defines_r5f;
++    }
++
++    return build_property;
++}
++
++module.exports = {
++    getComponentProperty,
++    getComponentBuildProperty,
++};
+\ No newline at end of file
+diff --git a/source/networking/enet/.project/project_cpsw_icssg.js b/source/networking/enet/.project/project_cpsw_icssg.js
+new file mode 100644
+index 000000000..df80c6ebf
+--- /dev/null
++++ b/source/networking/enet/.project/project_cpsw_icssg.js
+@@ -0,0 +1,14 @@
++function getComponentProperty(device)
++{
++    return require(`./project_${device}_cpsw_icssg`).getComponentProperty();
++};
++
++function getComponentBuildProperty(buildOption)
++{
++    return require(`./project_${buildOption.device}_cpsw_icssg`).getComponentBuildProperty(buildOption);
++};
++
++module.exports = {
++    getComponentProperty,
++    getComponentBuildProperty,
++};
+diff --git a/source/networking/enet/makefile.cpsw_icssg.am243x.r5f.gcc-armv7.freertos b/source/networking/enet/makefile.cpsw_icssg.am243x.r5f.gcc-armv7.freertos
+new file mode 100644
+index 000000000..af63b2958
+--- /dev/null
++++ b/source/networking/enet/makefile.cpsw_icssg.am243x.r5f.gcc-armv7.freertos
+@@ -0,0 +1,236 @@
++
++export MCU_PLUS_SDK_PATH?=$(abspath ../../..)
++include $(MCU_PLUS_SDK_PATH)/imports.mak
++
++CG_TOOL_ROOT=$(CGT_GCC_ARMV7_PATH)
++
++CC=$(CGT_GCC_ARMV7_PATH)/bin/arm-none-eabi-gcc
++AR=$(CGT_GCC_ARMV7_PATH)/bin/arm-none-eabi-gcc-ar
++
++PROFILE?=release
++ConfigName:=$(PROFILE)
++
++LIBNAME:=enet-cpsw-icssg.am243x.r5f.gcc-armv7.freertos.$(PROFILE).lib
++
++FILES_common := \
++    enet.c \
++    enet_trace.c \
++    enet_utils.c \
++    enet_osal.c \
++    enet_queue.c \
++    enet_rm.c \
++    enet_rm_ioctl.c \
++    enet_rm_ioctl_register.c \
++    enet_ioctl_register_multi.c \
++    enet_utils_dflt.c \
++    enet_phymdio_dflt.c \
++    enet_phymdio_dflt_ioctl.c \
++    enet_phymdio_dflt_ioctl_register.c \
++    mod_null.c \
++    mdio.c \
++    mdio_manual_ioctl.c \
++    mdio_ioctl.c \
++    mdio_ioctl_register.c \
++    cpsw_macport.c \
++    cpsw_macport_ioctl.c \
++    cpsw_macport_ioctl_register.c \
++    cpsw_macport_intervlan.c \
++    cpsw_macport_intervlan_ioctl.c \
++    cpsw_macport_intervlan_ioctl_register.c \
++    cpsw_macport_est.c \
++    cpsw_macport_est_ioctl.c \
++    cpsw_hostport.c \
++    cpsw_hostport_ioctl.c \
++    cpsw_hostport_ioctl_register.c \
++    cpsw_ale.c \
++    cpsw_ale_ioctl.c \
++    cpsw_ale_ioctl_register.c \
++    cpsw_stats.c \
++    cpsw_stats_ioctl.c \
++    cpsw_stats_ioctl_register.c \
++    cpsw_cpts.c \
++    cpsw_cpts_ioctl.c \
++    cpsw_cpts_ioctl_register.c \
++    per_null.c \
++    cpsw_intervlan.c \
++    cpsw.c \
++    cpsw_ioctl.c \
++    cpsw_ioctl_register.c \
++    cpsw_est.c \
++    cpsw_est_ioctl.c \
++    cpsw_est_ioctl_register.c \
++    enet_hostport.c \
++    enet_udma.c \
++    enet_udma_priv.c \
++    csl_cpgmac_sl.c \
++    csl_cpsw.c \
++    csl_cpsw_ss.c \
++    csl_cpsw_ale_9g_tblcfg.c \
++    csl_cpts.c \
++    csl_mdio.c \
++    icssg.c \
++    icssg_ioctl_register.c \
++    icssg_utils.c \
++    icssg_timesync.c \
++    icssg_timesync_ioctl_register.c \
++    icssg_tas.c \
++    icssg_tas_ioctl_register.c \
++    icssg_stats.c \
++    icssg_stats_ioctl_register.c \
++    k3_soc.c \
++    enetphy.c \
++    enet_apputils.c \
++    enet_appmemutils.c \
++    enet_appethpatterns.c \
++    enet_udmautils.c \
++    enet_ioctlutils.c \
++    enet_apputils_k3.c \
++
++FILES_PATH_common = \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/core \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/mod \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/per \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/per/V1 \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/common \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/dma/udma \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/emac/V5/priv \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/cpsw/V5/V5_0/priv \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/cpsw/V5/priv \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/cpts \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/mdio \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/soc/k3 \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/soc/k3/am64x_am243x \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/phy \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/utils \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/utils/V3 \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/utils/defcfg \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/board/src \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/board/src/am64x_am243x_evm \
++
++INCLUDES_common := \
++    -I${CG_TOOL_ROOT}/arm-none-eabi/include \
++    -I${MCU_PLUS_SDK_PATH}/source \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core/utils/include \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core/utils/V3 \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core/include \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core/include/core \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core/include/phy \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/phy \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/emac/V5 \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/cpsw/V5 \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/cpsw/V5/V5_0 \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/cpts \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/mdio \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/soc/k3/am64x_am243x \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/board \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/board/src/am64x_am243x_evm/include \
++    -I${MCU_PLUS_SDK_PATH}/source/board/ethphy/enet/rtos_drivers/include \
++    -I${MCU_PLUS_SDK_PATH}/source/kernel/freertos/FreeRTOS-Kernel/include \
++    -I${MCU_PLUS_SDK_PATH}/source/kernel/freertos/portable/TI_ARM_CLANG/ARM_CR5F \
++    -I${MCU_PLUS_SDK_PATH}/source/kernel/freertos/config/am243x/r5f \
++
++DEFINES_common := \
++    -DSOC_AM243X \
++    -DMAKEFILE_BUILD \
++    -DENET_CFG_ASSERT=1 \
++    -DENET_CFG_PRINT_ENABLE \
++    -DENET_CFG_TRACE_LEVEL=3 \
++    -DENET_ENABLE_PER_CPSW=1 \
++    -DENET_ENABLE_PER_ICSSG=1 \
++    -DENABLE_ENET_LOG \
++    -DOS_FREERTOS \
++
++DEFINES_debug := \
++    -DENET_CFG_DEV_ERROR=1 \
++    -DLWIPIF_INSTRUMENTATION_ENABLED=1 \
++    -DENETDMA_INSTRUMENTATION_ENABLED=1 \
++
++CFLAGS_common := \
++    -mcpu=cortex-r5 \
++    -mfloat-abi=hard \
++    -mfpu=vfpv3-d16 \
++    -Wall \
++    -Werror \
++    -mthumb \
++    -g \
++    -Wno-unused-function \
++    -Wno-enum-compare \
++    -Wno-uninitialized \
++    -Wno-address-of-packed-member \
++    -Wno-int-to-pointer-cast \
++    -Wno-stringop-truncation \
++    -fgnu89-inline \
++    -Wno-pointer-to-int-cast \
++    -Wno-unused-variable \
++    -Wno-unused-but-set-variable \
++    -fdata-sections \
++    -ffunction-sections \
++
++CFLAGS_debug := \
++    -D_DEBUG_=1 \
++
++CFLAGS_release := \
++    -O2 \
++
++ARFLAGS_common := \
++    cr \
++
++FILES := $(FILES_common) $(FILES_$(PROFILE))
++ASMFILES := $(ASMFILES_common) $(ASMFILES_$(PROFILE))
++FILES_PATH := $(FILES_PATH_common) $(FILES_PATH_$(PROFILE))
++CFLAGS := $(CFLAGS_common) $(CFLAGS_$(PROFILE))
++ASMFLAGS := $(CFLAGS_common) $(CFLAGS_$(PROFILE))
++ifeq ($(CPLUSPLUS_BUILD), yes)
++CFLAGS += $(CFLAGS_cpp_common)
++endif
++DEFINES := $(DEFINES_common) $(DEFINES_$(PROFILE))
++INCLUDES := $(INCLUDES_common) $(INCLUDE_$(PROFILE))
++ARFLAGS := $(ARFLAGS_common) $(ARFLAGS_$(PROFILE))
++
++LIBDIR := lib
++OBJDIR := obj/am243x/gcc-armv7/$(PROFILE)/r5f/enet-cpsw-icssg/freertos/
++OBJS := $(FILES:%.c=%.obj)
++OBJS += $(ASMFILES:%.S=%.obj)
++DEPS := $(FILES:%.c=%.d)
++
++vpath %.obj $(OBJDIR)
++vpath %.c $(FILES_PATH)
++vpath %.S $(FILES_PATH)
++
++$(OBJDIR)/%.obj %.obj: %.c
++	@echo  Compiling: $(LIBNAME): $<
++	$(CC) -c $(CFLAGS) $(INCLUDES) $(DEFINES) -MMD -MT $@ -o $(OBJDIR)/$@ $<
++
++$(OBJDIR)/%.obj %.obj: %.S
++	@echo  Compiling: $(LIBNAME): $<
++	$(CC) -c -x assembler-with-cpp $(CFLAGS) $(INCLUDES) $(DEFINES) -o $(OBJDIR)$@ $<
++
++all: $(LIBDIR)/$(LIBNAME)
++
++$(LIBDIR)/$(LIBNAME): $(OBJS) | $(LIBDIR)
++	@echo  .
++	@echo  Archiving: $(LIBNAME) to $@ ...
++	$(AR) $(ARFLAGS) $@ $(addprefix $(OBJDIR), $(OBJS))
++	@echo  Archiving: $(LIBNAME) Done !!!
++	@echo  .
++
++clean:
++	@echo  Cleaning: $(LIBNAME) ...
++	$(RMDIR) $(OBJDIR)
++	$(RM) $(LIBDIR)/$(LIBNAME)
++
++scrub:
++	@echo  Scrubing: $(LIBNAME) ...
++	-$(RMDIR) obj/
++	-$(RMDIR) lib/
++
++$(OBJS): | $(OBJDIR)
++
++$(LIBDIR) $(OBJDIR):
++	$(MKDIR) $@
++
++-include $(addprefix $(OBJDIR)/, $(DEPS))
+diff --git a/source/networking/enet/makefile.cpsw_icssg.am243x.r5f.gcc-armv7.nortos b/source/networking/enet/makefile.cpsw_icssg.am243x.r5f.gcc-armv7.nortos
+new file mode 100644
+index 000000000..c0ed23044
+--- /dev/null
++++ b/source/networking/enet/makefile.cpsw_icssg.am243x.r5f.gcc-armv7.nortos
+@@ -0,0 +1,233 @@
++
++export MCU_PLUS_SDK_PATH?=$(abspath ../../..)
++include $(MCU_PLUS_SDK_PATH)/imports.mak
++
++CG_TOOL_ROOT=$(CGT_GCC_ARMV7_PATH)
++
++CC=$(CGT_GCC_ARMV7_PATH)/bin/arm-none-eabi-gcc
++AR=$(CGT_GCC_ARMV7_PATH)/bin/arm-none-eabi-gcc-ar
++
++PROFILE?=release
++ConfigName:=$(PROFILE)
++
++LIBNAME:=enet-cpsw-icssg.am243x.r5f.gcc-armv7.nortos.$(PROFILE).lib
++
++FILES_common := \
++    enet.c \
++    enet_trace.c \
++    enet_utils.c \
++    enet_osal.c \
++    enet_queue.c \
++    enet_rm.c \
++    enet_rm_ioctl.c \
++    enet_rm_ioctl_register.c \
++    enet_ioctl_register_multi.c \
++    enet_utils_dflt.c \
++    enet_phymdio_dflt.c \
++    enet_phymdio_dflt_ioctl.c \
++    enet_phymdio_dflt_ioctl_register.c \
++    mod_null.c \
++    mdio.c \
++    mdio_manual_ioctl.c \
++    mdio_ioctl.c \
++    mdio_ioctl_register.c \
++    cpsw_macport.c \
++    cpsw_macport_ioctl.c \
++    cpsw_macport_ioctl_register.c \
++    cpsw_macport_intervlan.c \
++    cpsw_macport_intervlan_ioctl.c \
++    cpsw_macport_intervlan_ioctl_register.c \
++    cpsw_macport_est.c \
++    cpsw_macport_est_ioctl.c \
++    cpsw_hostport.c \
++    cpsw_hostport_ioctl.c \
++    cpsw_hostport_ioctl_register.c \
++    cpsw_ale.c \
++    cpsw_ale_ioctl.c \
++    cpsw_ale_ioctl_register.c \
++    cpsw_stats.c \
++    cpsw_stats_ioctl.c \
++    cpsw_stats_ioctl_register.c \
++    cpsw_cpts.c \
++    cpsw_cpts_ioctl.c \
++    cpsw_cpts_ioctl_register.c \
++    per_null.c \
++    cpsw_intervlan.c \
++    cpsw.c \
++    cpsw_ioctl.c \
++    cpsw_ioctl_register.c \
++    cpsw_est.c \
++    cpsw_est_ioctl.c \
++    cpsw_est_ioctl_register.c \
++    enet_hostport.c \
++    enet_udma.c \
++    enet_udma_priv.c \
++    csl_cpgmac_sl.c \
++    csl_cpsw.c \
++    csl_cpsw_ss.c \
++    csl_cpsw_ale_9g_tblcfg.c \
++    csl_cpts.c \
++    csl_mdio.c \
++    icssg.c \
++    icssg_ioctl_register.c \
++    icssg_utils.c \
++    icssg_timesync.c \
++    icssg_timesync_ioctl_register.c \
++    icssg_tas.c \
++    icssg_tas_ioctl_register.c \
++    icssg_stats.c \
++    icssg_stats_ioctl_register.c \
++    k3_soc.c \
++    enetphy.c \
++    enet_apputils.c \
++    enet_appmemutils.c \
++    enet_appethpatterns.c \
++    enet_udmautils.c \
++    enet_ioctlutils.c \
++    enet_apputils_k3.c \
++
++FILES_PATH_common = \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/core \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/mod \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/per \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/per/V1 \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/common \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/dma/udma \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/emac/V5/priv \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/cpsw/V5/V5_0/priv \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/cpsw/V5/priv \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/cpts \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/mdio \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/soc/k3 \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/soc/k3/am64x_am243x \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/phy \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/utils \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/utils/V3 \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/utils/defcfg \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/board/src \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/board/src/am64x_am243x_evm \
++
++INCLUDES_common := \
++    -I${CG_TOOL_ROOT}/arm-none-eabi/include \
++    -I${MCU_PLUS_SDK_PATH}/source \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core/utils/include \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core/utils/V3 \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core/include \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core/include/core \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core/include/phy \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/phy \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/emac/V5 \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/cpsw/V5 \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/cpsw/V5/V5_0 \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/cpts \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/mdio \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/soc/k3/am64x_am243x \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/board \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/board/src/am64x_am243x_evm/include \
++    -I${MCU_PLUS_SDK_PATH}/source/board/ethphy/enet/rtos_drivers/include \
++
++DEFINES_common := \
++    -DSOC_AM243X \
++    -DMAKEFILE_BUILD \
++    -DENET_CFG_ASSERT=1 \
++    -DENET_CFG_PRINT_ENABLE \
++    -DENET_CFG_TRACE_LEVEL=3 \
++    -DENET_ENABLE_PER_CPSW=1 \
++    -DENET_ENABLE_PER_ICSSG=1 \
++    -DENABLE_ENET_LOG \
++    -DOS_NORTOS \
++
++DEFINES_debug := \
++    -DENET_CFG_DEV_ERROR=1 \
++    -DLWIPIF_INSTRUMENTATION_ENABLED=1 \
++    -DENETDMA_INSTRUMENTATION_ENABLED=1 \
++
++CFLAGS_common := \
++    -mcpu=cortex-r5 \
++    -mfloat-abi=hard \
++    -mfpu=vfpv3-d16 \
++    -Wall \
++    -Werror \
++    -mthumb \
++    -g \
++    -Wno-unused-function \
++    -Wno-enum-compare \
++    -Wno-uninitialized \
++    -Wno-address-of-packed-member \
++    -Wno-int-to-pointer-cast \
++    -Wno-stringop-truncation \
++    -fgnu89-inline \
++    -Wno-pointer-to-int-cast \
++    -Wno-unused-variable \
++    -Wno-unused-but-set-variable \
++    -fdata-sections \
++    -ffunction-sections \
++
++CFLAGS_debug := \
++    -D_DEBUG_=1 \
++
++CFLAGS_release := \
++    -O2 \
++
++ARFLAGS_common := \
++    cr \
++
++FILES := $(FILES_common) $(FILES_$(PROFILE))
++ASMFILES := $(ASMFILES_common) $(ASMFILES_$(PROFILE))
++FILES_PATH := $(FILES_PATH_common) $(FILES_PATH_$(PROFILE))
++CFLAGS := $(CFLAGS_common) $(CFLAGS_$(PROFILE))
++ASMFLAGS := $(CFLAGS_common) $(CFLAGS_$(PROFILE))
++ifeq ($(CPLUSPLUS_BUILD), yes)
++CFLAGS += $(CFLAGS_cpp_common)
++endif
++DEFINES := $(DEFINES_common) $(DEFINES_$(PROFILE))
++INCLUDES := $(INCLUDES_common) $(INCLUDE_$(PROFILE))
++ARFLAGS := $(ARFLAGS_common) $(ARFLAGS_$(PROFILE))
++
++LIBDIR := lib
++OBJDIR := obj/am243x/gcc-armv7/$(PROFILE)/r5f/enet-cpsw-icssg/nortos/
++OBJS := $(FILES:%.c=%.obj)
++OBJS += $(ASMFILES:%.S=%.obj)
++DEPS := $(FILES:%.c=%.d)
++
++vpath %.obj $(OBJDIR)
++vpath %.c $(FILES_PATH)
++vpath %.S $(FILES_PATH)
++
++$(OBJDIR)/%.obj %.obj: %.c
++	@echo  Compiling: $(LIBNAME): $<
++	$(CC) -c $(CFLAGS) $(INCLUDES) $(DEFINES) -MMD -MT $@ -o $(OBJDIR)/$@ $<
++
++$(OBJDIR)/%.obj %.obj: %.S
++	@echo  Compiling: $(LIBNAME): $<
++	$(CC) -c -x assembler-with-cpp $(CFLAGS) $(INCLUDES) $(DEFINES) -o $(OBJDIR)$@ $<
++
++all: $(LIBDIR)/$(LIBNAME)
++
++$(LIBDIR)/$(LIBNAME): $(OBJS) | $(LIBDIR)
++	@echo  .
++	@echo  Archiving: $(LIBNAME) to $@ ...
++	$(AR) $(ARFLAGS) $@ $(addprefix $(OBJDIR), $(OBJS))
++	@echo  Archiving: $(LIBNAME) Done !!!
++	@echo  .
++
++clean:
++	@echo  Cleaning: $(LIBNAME) ...
++	$(RMDIR) $(OBJDIR)
++	$(RM) $(LIBDIR)/$(LIBNAME)
++
++scrub:
++	@echo  Scrubing: $(LIBNAME) ...
++	-$(RMDIR) obj/
++	-$(RMDIR) lib/
++
++$(OBJS): | $(OBJDIR)
++
++$(LIBDIR) $(OBJDIR):
++	$(MKDIR) $@
++
++-include $(addprefix $(OBJDIR)/, $(DEPS))
+diff --git a/source/networking/enet/makefile.cpsw_icssg.am243x.r5f.ti-arm-clang.freertos b/source/networking/enet/makefile.cpsw_icssg.am243x.r5f.ti-arm-clang.freertos
+new file mode 100644
+index 000000000..a8db70861
+--- /dev/null
++++ b/source/networking/enet/makefile.cpsw_icssg.am243x.r5f.ti-arm-clang.freertos
+@@ -0,0 +1,249 @@
++
++export MCU_PLUS_SDK_PATH?=$(abspath ../../..)
++include $(MCU_PLUS_SDK_PATH)/imports.mak
++
++CG_TOOL_ROOT=$(CGT_TI_ARM_CLANG_PATH)
++
++CC=$(CGT_TI_ARM_CLANG_PATH)/bin/tiarmclang
++AR=$(CGT_TI_ARM_CLANG_PATH)/bin/tiarmar
++
++PROFILE?=release
++ConfigName:=$(PROFILE)
++
++LIBNAME:=enet-cpsw-icssg.am243x.r5f.ti-arm-clang.freertos.$(PROFILE).lib
++
++FILES_common := \
++    enet.c \
++    enet_trace.c \
++    enet_utils.c \
++    enet_osal.c \
++    enet_queue.c \
++    enet_rm.c \
++    enet_rm_ioctl.c \
++    enet_rm_ioctl_register.c \
++    enet_ioctl_register_multi.c \
++    enet_utils_dflt.c \
++    enet_phymdio_dflt.c \
++    enet_phymdio_dflt_ioctl.c \
++    enet_phymdio_dflt_ioctl_register.c \
++    mod_null.c \
++    mdio.c \
++    mdio_manual_ioctl.c \
++    mdio_ioctl.c \
++    mdio_ioctl_register.c \
++    cpsw_macport.c \
++    cpsw_macport_ioctl.c \
++    cpsw_macport_ioctl_register.c \
++    cpsw_macport_intervlan.c \
++    cpsw_macport_intervlan_ioctl.c \
++    cpsw_macport_intervlan_ioctl_register.c \
++    cpsw_macport_est.c \
++    cpsw_macport_est_ioctl.c \
++    cpsw_hostport.c \
++    cpsw_hostport_ioctl.c \
++    cpsw_hostport_ioctl_register.c \
++    cpsw_ale.c \
++    cpsw_ale_ioctl.c \
++    cpsw_ale_ioctl_register.c \
++    cpsw_stats.c \
++    cpsw_stats_ioctl.c \
++    cpsw_stats_ioctl_register.c \
++    cpsw_cpts.c \
++    cpsw_cpts_ioctl.c \
++    cpsw_cpts_ioctl_register.c \
++    per_null.c \
++    cpsw_intervlan.c \
++    cpsw.c \
++    cpsw_ioctl.c \
++    cpsw_ioctl_register.c \
++    cpsw_est.c \
++    cpsw_est_ioctl.c \
++    cpsw_est_ioctl_register.c \
++    enet_hostport.c \
++    enet_udma.c \
++    enet_udma_priv.c \
++    csl_cpgmac_sl.c \
++    csl_cpsw.c \
++    csl_cpsw_ss.c \
++    csl_cpsw_ale_9g_tblcfg.c \
++    csl_cpts.c \
++    csl_mdio.c \
++    icssg.c \
++    icssg_ioctl_register.c \
++    icssg_utils.c \
++    icssg_timesync.c \
++    icssg_timesync_ioctl_register.c \
++    icssg_tas.c \
++    icssg_tas_ioctl_register.c \
++    icssg_stats.c \
++    icssg_stats_ioctl_register.c \
++    k3_soc.c \
++    enetphy.c \
++    enet_apputils.c \
++    enet_appmemutils.c \
++    enet_appethpatterns.c \
++    enet_udmautils.c \
++    enet_ioctlutils.c \
++    enet_apputils_k3.c \
++
++FILES_PATH_common = \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/core \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/mod \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/per \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/per/V1 \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/common \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/dma/udma \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/emac/V5/priv \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/cpsw/V5/V5_0/priv \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/cpsw/V5/priv \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/cpts \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/mdio \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/soc/k3 \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/soc/k3/am64x_am243x \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/phy \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/utils \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/utils/V3 \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/utils/defcfg \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/board/src \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/board/src/am64x_am243x_evm \
++
++INCLUDES_common := \
++    -I${CG_TOOL_ROOT}/include/c \
++    -I${MCU_PLUS_SDK_PATH}/source \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core/utils/include \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core/utils/V3 \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core/include \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core/include/core \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core/include/phy \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/phy \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/emac/V5 \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/cpsw/V5 \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/cpsw/V5/V5_0 \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/cpts \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/mdio \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/soc/k3/am64x_am243x \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/board \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/board/src/am64x_am243x_evm/include \
++    -I${MCU_PLUS_SDK_PATH}/source/board/ethphy/enet/rtos_drivers/include \
++    -I${MCU_PLUS_SDK_PATH}/source/kernel/freertos/FreeRTOS-Kernel/include \
++    -I${MCU_PLUS_SDK_PATH}/source/kernel/freertos/portable/TI_ARM_CLANG/ARM_CR5F \
++    -I${MCU_PLUS_SDK_PATH}/source/kernel/freertos/config/am243x/r5f \
++
++DEFINES_common := \
++    -DSOC_AM243X \
++    -DMAKEFILE_BUILD \
++    -DENET_CFG_ASSERT=1 \
++    -DENET_CFG_PRINT_ENABLE \
++    -DENET_CFG_TRACE_LEVEL=3 \
++    -DENET_ENABLE_PER_CPSW=1 \
++    -DENET_ENABLE_PER_ICSSG=1 \
++    -DENABLE_ENET_LOG \
++    -DOS_FREERTOS \
++
++DEFINES_debug := \
++    -DENET_CFG_DEV_ERROR=1 \
++    -DLWIPIF_INSTRUMENTATION_ENABLED=1 \
++    -DENETDMA_INSTRUMENTATION_ENABLED=1 \
++
++CFLAGS_common := \
++    -mcpu=cortex-r5 \
++    -mfloat-abi=hard \
++    -mfpu=vfpv3-d16 \
++    -mthumb \
++    -Wall \
++    -Werror \
++    -g \
++    -Wno-gnu-variable-sized-type-not-at-end \
++    -Wno-unused-function \
++    -mno-unaligned-access \
++    -Wno-extra \
++    -fno-strict-aliasing \
++    -Wno-error=unused-but-set-variable \
++    -Wno-unused-but-set-variable \
++
++CFLAGS_release := \
++    -Os \
++    -Oz \
++    -flto \
++
++CFLAGS_cpp_common := \
++    -Wno-c99-designator \
++    -Wno-extern-c-compat \
++    -Wno-c++11-narrowing \
++    -Wno-reorder-init-list \
++    -Wno-register \
++    -Wno-writable-strings \
++    -Wno-enum-compare \
++    -Wno-reserved-user-defined-literal \
++    -Wno-unused-const-variable \
++    -Wno-vla-cxx-extension \
++    -x c++ \
++
++CFLAGS_debug := \
++    -D_DEBUG_=1 \
++
++ARFLAGS_common := \
++    rc \
++
++FILES := $(FILES_common) $(FILES_$(PROFILE))
++ASMFILES := $(ASMFILES_common) $(ASMFILES_$(PROFILE))
++FILES_PATH := $(FILES_PATH_common) $(FILES_PATH_$(PROFILE))
++CFLAGS := $(CFLAGS_common) $(CFLAGS_$(PROFILE))
++ASMFLAGS := $(CFLAGS_common) $(CFLAGS_$(PROFILE))
++ifeq ($(INSTRUMENTATION_MODE), yes)
++CFLAGS += -fprofile-instr-generate -fcoverage-mapping
++endif
++ifeq ($(CPLUSPLUS_BUILD), yes)
++CFLAGS += $(CFLAGS_cpp_common)
++endif
++DEFINES := $(DEFINES_common) $(DEFINES_$(PROFILE))
++INCLUDES := $(INCLUDES_common) $(INCLUDE_$(PROFILE))
++ARFLAGS := $(ARFLAGS_common) $(ARFLAGS_$(PROFILE))
++
++LIBDIR := lib
++OBJDIR := obj/am243x/ti-arm-clang/$(PROFILE)/r5f/enet-cpsw-icssg/freertos/
++OBJS := $(FILES:%.c=%.obj)
++OBJS += $(ASMFILES:%.S=%.obj)
++DEPS := $(FILES:%.c=%.d)
++
++vpath %.obj $(OBJDIR)
++vpath %.c $(FILES_PATH)
++vpath %.S $(FILES_PATH)
++
++$(OBJDIR)/%.obj %.obj: %.c
++	@echo  Compiling: $(LIBNAME): $<
++	$(CC) -c $(CFLAGS) $(INCLUDES) $(DEFINES) -MMD -o $(OBJDIR)/$@ $<
++
++$(OBJDIR)/%.obj %.obj: %.S
++	@echo  Compiling: $(LIBNAME): $<
++	$(CC) -c $(ASMFLAGS) $(INCLUDES) $(DEFINES) -o $(OBJDIR)/$@ $<
++
++all: $(LIBDIR)/$(LIBNAME)
++
++$(LIBDIR)/$(LIBNAME): $(OBJS) | $(LIBDIR)
++	@echo  .
++	@echo  Archiving: $(LIBNAME) to $@ ...
++	$(AR) $(ARFLAGS) $@ $(addprefix $(OBJDIR), $(OBJS))
++	@echo  Archiving: $(LIBNAME) Done !!!
++	@echo  .
++
++clean:
++	@echo  Cleaning: $(LIBNAME) ...
++	$(RMDIR) $(OBJDIR)
++	$(RM) $(LIBDIR)/$(LIBNAME)
++
++scrub:
++	@echo  Scrubing: $(LIBNAME) ...
++	-$(RMDIR) obj/
++	-$(RMDIR) lib/
++
++$(OBJS): | $(OBJDIR)
++
++$(LIBDIR) $(OBJDIR):
++	$(MKDIR) $@
++
++-include $(addprefix $(OBJDIR)/, $(DEPS))
+diff --git a/source/networking/enet/makefile.cpsw_icssg.am243x.r5f.ti-arm-clang.nortos b/source/networking/enet/makefile.cpsw_icssg.am243x.r5f.ti-arm-clang.nortos
+new file mode 100644
+index 000000000..103a5be5e
+--- /dev/null
++++ b/source/networking/enet/makefile.cpsw_icssg.am243x.r5f.ti-arm-clang.nortos
+@@ -0,0 +1,246 @@
++
++export MCU_PLUS_SDK_PATH?=$(abspath ../../..)
++include $(MCU_PLUS_SDK_PATH)/imports.mak
++
++CG_TOOL_ROOT=$(CGT_TI_ARM_CLANG_PATH)
++
++CC=$(CGT_TI_ARM_CLANG_PATH)/bin/tiarmclang
++AR=$(CGT_TI_ARM_CLANG_PATH)/bin/tiarmar
++
++PROFILE?=release
++ConfigName:=$(PROFILE)
++
++LIBNAME:=enet-cpsw-icssg.am243x.r5f.ti-arm-clang.nortos.$(PROFILE).lib
++
++FILES_common := \
++    enet.c \
++    enet_trace.c \
++    enet_utils.c \
++    enet_osal.c \
++    enet_queue.c \
++    enet_rm.c \
++    enet_rm_ioctl.c \
++    enet_rm_ioctl_register.c \
++    enet_ioctl_register_multi.c \
++    enet_utils_dflt.c \
++    enet_phymdio_dflt.c \
++    enet_phymdio_dflt_ioctl.c \
++    enet_phymdio_dflt_ioctl_register.c \
++    mod_null.c \
++    mdio.c \
++    mdio_manual_ioctl.c \
++    mdio_ioctl.c \
++    mdio_ioctl_register.c \
++    cpsw_macport.c \
++    cpsw_macport_ioctl.c \
++    cpsw_macport_ioctl_register.c \
++    cpsw_macport_intervlan.c \
++    cpsw_macport_intervlan_ioctl.c \
++    cpsw_macport_intervlan_ioctl_register.c \
++    cpsw_macport_est.c \
++    cpsw_macport_est_ioctl.c \
++    cpsw_hostport.c \
++    cpsw_hostport_ioctl.c \
++    cpsw_hostport_ioctl_register.c \
++    cpsw_ale.c \
++    cpsw_ale_ioctl.c \
++    cpsw_ale_ioctl_register.c \
++    cpsw_stats.c \
++    cpsw_stats_ioctl.c \
++    cpsw_stats_ioctl_register.c \
++    cpsw_cpts.c \
++    cpsw_cpts_ioctl.c \
++    cpsw_cpts_ioctl_register.c \
++    per_null.c \
++    cpsw_intervlan.c \
++    cpsw.c \
++    cpsw_ioctl.c \
++    cpsw_ioctl_register.c \
++    cpsw_est.c \
++    cpsw_est_ioctl.c \
++    cpsw_est_ioctl_register.c \
++    enet_hostport.c \
++    enet_udma.c \
++    enet_udma_priv.c \
++    csl_cpgmac_sl.c \
++    csl_cpsw.c \
++    csl_cpsw_ss.c \
++    csl_cpsw_ale_9g_tblcfg.c \
++    csl_cpts.c \
++    csl_mdio.c \
++    icssg.c \
++    icssg_ioctl_register.c \
++    icssg_utils.c \
++    icssg_timesync.c \
++    icssg_timesync_ioctl_register.c \
++    icssg_tas.c \
++    icssg_tas_ioctl_register.c \
++    icssg_stats.c \
++    icssg_stats_ioctl_register.c \
++    k3_soc.c \
++    enetphy.c \
++    enet_apputils.c \
++    enet_appmemutils.c \
++    enet_appethpatterns.c \
++    enet_udmautils.c \
++    enet_ioctlutils.c \
++    enet_apputils_k3.c \
++
++FILES_PATH_common = \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/core \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/mod \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/per \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/per/V1 \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/common \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/dma/udma \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/emac/V5/priv \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/cpsw/V5/V5_0/priv \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/cpsw/V5/priv \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/cpts \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/mdio \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/soc/k3 \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/soc/k3/am64x_am243x \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/phy \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/utils \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/utils/V3 \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/core/utils/defcfg \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/board/src \
++    ${MCU_PLUS_SDK_PATH}/source/networking/enet/board/src/am64x_am243x_evm \
++
++INCLUDES_common := \
++    -I${CG_TOOL_ROOT}/include/c \
++    -I${MCU_PLUS_SDK_PATH}/source \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core/utils/include \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core/utils/V3 \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core/include \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core/include/core \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core/include/phy \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/core/src/phy \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/emac/V5 \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/cpsw/V5 \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/cpsw/V5/V5_0 \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/cpts \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/hw_include/mdio \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/soc/k3/am64x_am243x \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/board \
++    -I${MCU_PLUS_SDK_PATH}/source/networking/enet/board/src/am64x_am243x_evm/include \
++    -I${MCU_PLUS_SDK_PATH}/source/board/ethphy/enet/rtos_drivers/include \
++
++DEFINES_common := \
++    -DSOC_AM243X \
++    -DMAKEFILE_BUILD \
++    -DENET_CFG_ASSERT=1 \
++    -DENET_CFG_PRINT_ENABLE \
++    -DENET_CFG_TRACE_LEVEL=3 \
++    -DENET_ENABLE_PER_CPSW=1 \
++    -DENET_ENABLE_PER_ICSSG=1 \
++    -DENABLE_ENET_LOG \
++    -DOS_NORTOS \
++
++DEFINES_debug := \
++    -DENET_CFG_DEV_ERROR=1 \
++    -DLWIPIF_INSTRUMENTATION_ENABLED=1 \
++    -DENETDMA_INSTRUMENTATION_ENABLED=1 \
++
++CFLAGS_common := \
++    -mcpu=cortex-r5 \
++    -mfloat-abi=hard \
++    -mfpu=vfpv3-d16 \
++    -mthumb \
++    -Wall \
++    -Werror \
++    -g \
++    -Wno-gnu-variable-sized-type-not-at-end \
++    -Wno-unused-function \
++    -mno-unaligned-access \
++    -Wno-extra \
++    -fno-strict-aliasing \
++    -Wno-error=unused-but-set-variable \
++    -Wno-unused-but-set-variable \
++
++CFLAGS_release := \
++    -Os \
++    -Oz \
++    -flto \
++
++CFLAGS_cpp_common := \
++    -Wno-c99-designator \
++    -Wno-extern-c-compat \
++    -Wno-c++11-narrowing \
++    -Wno-reorder-init-list \
++    -Wno-register \
++    -Wno-writable-strings \
++    -Wno-enum-compare \
++    -Wno-reserved-user-defined-literal \
++    -Wno-unused-const-variable \
++    -Wno-vla-cxx-extension \
++    -x c++ \
++
++CFLAGS_debug := \
++    -D_DEBUG_=1 \
++
++ARFLAGS_common := \
++    rc \
++
++FILES := $(FILES_common) $(FILES_$(PROFILE))
++ASMFILES := $(ASMFILES_common) $(ASMFILES_$(PROFILE))
++FILES_PATH := $(FILES_PATH_common) $(FILES_PATH_$(PROFILE))
++CFLAGS := $(CFLAGS_common) $(CFLAGS_$(PROFILE))
++ASMFLAGS := $(CFLAGS_common) $(CFLAGS_$(PROFILE))
++ifeq ($(INSTRUMENTATION_MODE), yes)
++CFLAGS += -fprofile-instr-generate -fcoverage-mapping
++endif
++ifeq ($(CPLUSPLUS_BUILD), yes)
++CFLAGS += $(CFLAGS_cpp_common)
++endif
++DEFINES := $(DEFINES_common) $(DEFINES_$(PROFILE))
++INCLUDES := $(INCLUDES_common) $(INCLUDE_$(PROFILE))
++ARFLAGS := $(ARFLAGS_common) $(ARFLAGS_$(PROFILE))
++
++LIBDIR := lib
++OBJDIR := obj/am243x/ti-arm-clang/$(PROFILE)/r5f/enet-cpsw-icssg/nortos/
++OBJS := $(FILES:%.c=%.obj)
++OBJS += $(ASMFILES:%.S=%.obj)
++DEPS := $(FILES:%.c=%.d)
++
++vpath %.obj $(OBJDIR)
++vpath %.c $(FILES_PATH)
++vpath %.S $(FILES_PATH)
++
++$(OBJDIR)/%.obj %.obj: %.c
++	@echo  Compiling: $(LIBNAME): $<
++	$(CC) -c $(CFLAGS) $(INCLUDES) $(DEFINES) -MMD -o $(OBJDIR)/$@ $<
++
++$(OBJDIR)/%.obj %.obj: %.S
++	@echo  Compiling: $(LIBNAME): $<
++	$(CC) -c $(ASMFLAGS) $(INCLUDES) $(DEFINES) -o $(OBJDIR)/$@ $<
++
++all: $(LIBDIR)/$(LIBNAME)
++
++$(LIBDIR)/$(LIBNAME): $(OBJS) | $(LIBDIR)
++	@echo  .
++	@echo  Archiving: $(LIBNAME) to $@ ...
++	$(AR) $(ARFLAGS) $@ $(addprefix $(OBJDIR), $(OBJS))
++	@echo  Archiving: $(LIBNAME) Done !!!
++	@echo  .
++
++clean:
++	@echo  Cleaning: $(LIBNAME) ...
++	$(RMDIR) $(OBJDIR)
++	$(RM) $(LIBDIR)/$(LIBNAME)
++
++scrub:
++	@echo  Scrubing: $(LIBNAME) ...
++	-$(RMDIR) obj/
++	-$(RMDIR) lib/
++
++$(OBJS): | $(OBJDIR)
++
++$(LIBDIR) $(OBJDIR):
++	$(MKDIR) $@
++
++-include $(addprefix $(OBJDIR)/, $(DEPS))
+-- 
+2.43.0
+

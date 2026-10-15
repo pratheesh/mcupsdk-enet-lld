@@ -65,11 +65,13 @@ extern int32_t EnetApp_driverOpen(Enet_Type enetType, uint32_t instId);
  * \param instId    Enet Peripheral instance id
  */
 void EnetApp_driverClose(Enet_Type enetType, uint32_t instId);
+% }
 
 Icssg_Cfg * EnetApp_getIcssgCfg(const Enet_Type enetType, const uint32_t instId);
 
 void EnetApp_icssgInitMacAddr(const Enet_Type enetType,
                               const uint32_t instId);
+% if(instance.McmEnable == false){
 
 void EnetApp_closePortLink(Enet_Type enetType, uint32_t instId);
 % }

@@ -11,6 +11,8 @@
 % let instances = module.$instances;
 % let uniqueDevices = ethphy_script.getUniqueLinkedEthphy(module);
 % let linkedInstances = ethphy_script.getLinkedInstances(module);
+% let combo = system.getScript("/networking/common/enet_combo");
+% linkedInstances = linkedInstances.filter((idx) => combo.isLinkedToModule(instances[idx], "/networking/enet_icss/enet_icss"));
 %%{
 function getPhyInstance(inst, port){
     let matchInst;

@@ -71,6 +71,17 @@
 #define ENETMCM_PERIODICTSK_PRIORITY        (7U)
 #define ENETMCM_ASYNCIOCTLTASK_PRIORITY     (9U)
 
+/* Number of MCM objects: one per peripheral family when CPSW and ICSSG are
+ * both enabled on the core, as each MCM serves one Enet instance */
+#if defined(ENET_ENABLE_PER_CPSW) && defined(ENET_ENABLE_PER_ICSSG)
+#if (ENET_ENABLE_PER_CPSW == 1) && (ENET_ENABLE_PER_ICSSG == 1)
+#define ENETMCM_OBJ_NUM                     (2U)
+#endif
+#endif
+#ifndef ENETMCM_OBJ_NUM
+#define ENETMCM_OBJ_NUM                     (1U)
+#endif
+
 #ifdef NULL_PTR
 #undef NULL_PTR
 #endif
@@ -249,11 +260,34 @@ static EnetMcm_Obj gMcmObj[] =
         .asyncIoctlDone         = false,
         .asyncIoctlTaskShutdown = false,
     },
+#if (ENETMCM_OBJ_NUM > 1U)
+    /* ICSSG, when CPSW and ICSSG are used on the same core */
+    [1U] =
+    {
+        .isInitDone             = false,
+        .timerTaskShutDownFlag  = false,
+        .hMutex                 = (SemaphoreP_Object *) NULL_PTR,
+        .hMboxCmd               = (QueueHandle_t) NULL_PTR,
+        .hMboxResponse          = (QueueHandle_t) NULL_PTR,
+        .asyncIoctlDone         = false,
+        .asyncIoctlTaskShutdown = false,
+    },
+#endif
 };
 
 /* ========================================================================== */
 /*                          Function Definitions                              */
 /* ========================================================================== */
+
+static EnetMcm_Handle EnetMcm_getObj(Enet_Type enetType)
+{
+#if (ENETMCM_OBJ_NUM > 1U)
+    /* One MCM per peripheral family: CPSW uses object 0, ICSSG object 1 */
+    return &gMcmObj[Enet_isCpswFamily(enetType) ? 0U : 1U];
+#else
+    return &gMcmObj[0U];
+#endif
+}
 
 #if (ENET_ENABLE_PER_ICSSG == 1)
 static void EnetMcm_evtCb(Enet_Event evt,
@@ -444,7 +478,7 @@ int32_t  EnetMcm_init(const EnetMcm_InitConfig *pMcmInitCfg)
 
     key = HwiP_disable();
 
-    hMcm = &gMcmObj[0U];
+    hMcm = EnetMcm_getObj(enetType);
     if (hMcm->hMutex == NULL_PTR)
     {
         int32_t mutexStatus = SemaphoreP_constructMutex(&hMcm->mutexObj);
@@ -493,7 +527,7 @@ int32_t  EnetMcm_init(const EnetMcm_InitConfig *pMcmInitCfg)
 void  EnetMcm_getCmdIf(Enet_Type enetType,
                        EnetMcm_CmdIf *hMcmCmdIf)
 {
-    EnetMcm_Handle hMcm = &gMcmObj[0U];
+    EnetMcm_Handle hMcm = EnetMcm_getObj(enetType);
 
     EnetAppUtils_assert(hMcmCmdIf != NULL_PTR);
     EnetAppUtils_assert(hMcm->hMutex != NULL_PTR);
@@ -512,7 +546,7 @@ void  EnetMcm_getCmdIf(Enet_Type enetType,
 
 void EnetMcm_deInit(Enet_Type enetType)
 {
-    EnetMcm_Handle hMcm = &gMcmObj[0U];
+    EnetMcm_Handle hMcm = EnetMcm_getObj(enetType);
     UBaseType_t numPendingmsgs;
 
     EnetAppUtils_assert(hMcm->hMutex != NULL_PTR);

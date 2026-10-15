@@ -11,6 +11,8 @@
 % let instances = module.$instances;
 % let uniqueDevices = ethphyScript.getUniqueLinkedEthphy(module);
 % let linkedInstances = ethphyScript.getLinkedInstances(module);
+% let combo = system.getScript("/networking/common/enet_combo");
+% linkedInstances = linkedInstances.filter((idx) => combo.isLinkedToModule(instances[idx], "/networking/enet_cpsw/enet_cpsw"));
 /* ========================================================================== */
 /*                             Include Files                                  */
 /* ========================================================================== */

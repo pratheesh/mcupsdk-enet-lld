@@ -1,0 +1,46 @@
+%%{
+    /* CPSW + ICSSG on one core: public board macros and, for a module with a
+     * custom board, the board functions the application provides. */
+    let combo = system.getScript("/networking/common/enet_combo");
+    let icssgCustom = combo.hasCustomBoard(combo.icssModuleName);
+    let cpswCustom  = combo.hasCustomBoard(combo.cpswModuleName);
+%%}
+
+/* ========================================================================== */
+/*          CPSW + ICSSG on one core: board API for both peripherals          */
+/* ========================================================================== */
+
+/*!
+ * \brief Define indicating application has enabled custom board configuration
+ *        for CPSW or ICSSG (see ENETBOARD_SYSCFG_CUSTOM_BOARD_ICSSG/_CPSW).
+ */
+#define ENETBOARD_SYSCFG_CUSTOM_BOARD         (ENETBOARD_SYSCFG_CUSTOM_BOARD_ICSSG || \
+                                               ENETBOARD_SYSCFG_CUSTOM_BOARD_CPSW)
+% if (icssgCustom || cpswCustom) {
+
+/*
+ * Custom board: the application provides the PHY driver table of both
+ * peripherals (gEnetPhyDrvTbl) and the board functions below for the
+ * peripheral with the custom board. The public EnetBoard_xxx() functions
+ * dispatch to them.
+ */
+% }
+% if (icssgCustom) {
+
+/* ICSSG custom board functions, provided by the application */
+const EnetBoard_PhyCfg *EnetBoard_getPhyCfg_Icssg(const EnetBoard_EthPort *ethPort);
+int32_t EnetBoard_setupPorts_Icssg(EnetBoard_EthPort *ethPorts, uint32_t numEthPorts);
+void EnetBoard_getMiiConfig_Icssg(EnetMacPort_Interface *mii);
+uint32_t EnetBoard_getId_Icssg(void);
+void EnetBoard_getMacAddrList_Icssg(uint8_t macAddr[][ENET_MAC_ADDR_LEN],
+                                    uint32_t maxMacEntries,
+                                    uint32_t *pAvailMacEntries);
+% }
+% if (cpswCustom) {
+
+/* CPSW custom board functions, provided by the application */
+const EnetBoard_PhyCfg *EnetBoard_getPhyCfg_Cpsw(const EnetBoard_EthPort *ethPort);
+int32_t EnetBoard_setupPorts_Cpsw(EnetBoard_EthPort *ethPorts, uint32_t numEthPorts);
+void EnetBoard_getMiiConfig_Cpsw(EnetMacPort_Interface *mii, const Enet_MacPort macPort);
+uint32_t EnetBoard_getId_Cpsw(void);
+% }

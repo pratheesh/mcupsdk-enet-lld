@@ -204,7 +204,7 @@ function isLinuxEnabled(){
 % }
 % }
 #define ENET_SYSCFG_NETIF_COUNT                    (`netifScript.getTotalNetIfCount(instances)`U)
-#define ENET_SYSCFG_DEFAULT_NETIF_IDX              (`netifScript.getDefaultNetifIndex()`)
+#define ENET_SYSCFG_DEFAULT_NETIF_IDX              (`system.getScript("/networking/common/enet_combo").getModuleDefaultNetifIdx(module.$name, netifScript.getDefaultNetifIndex())`)
 /*
  * Packet sizes for different pools. LARGE_POOL is largest packet size pool with MEDIUM_POOL
  * second largest and SMALL_POOL smallest

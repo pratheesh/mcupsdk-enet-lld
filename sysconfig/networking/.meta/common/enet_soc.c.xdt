@@ -35,8 +35,12 @@
  *
  *  \brief This file contains enet soc config related functionality.
  */
+% let combo = system.getScript("/networking/common/enet_combo");
 % for(let subTemplate of args) {
     % if (subTemplate.enet_soc) {
-`system.getTemplate(subTemplate.enet_soc)(subTemplate.moduleName)`
+`combo.renderSubTemplate(subTemplate, "enet_soc")`
     % }
+% }
+% if (combo.isComboMode()) {
+`combo.renderComboTemplate("enet_soc_c")`
 % }

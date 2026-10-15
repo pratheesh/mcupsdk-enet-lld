@@ -65,6 +65,11 @@
 #include <include/common/enet_phymdio_dflt.h>
 #include <include/phy/enetphy.h>
 
+/* Renames the register functions shared with the other Ethernet peripheral
+ * family when both are built into one library. No-op otherwise. */
+#define ENET_IOCTL_REGISTER_PER_CPSW
+#include <priv/core/enet_ioctl_register_multi_priv.h>
+
 /* ========================================================================== */
 /*                           Macros & Typedefs                                */
 /* ========================================================================== */
