@@ -51,7 +51,11 @@ extern "C" {
 
 /* UART0 functional clock and baud rate */
 #ifndef MIN_LOG_UART_CLK_HZ
+#if defined(SOC_AM261X)
+#define MIN_LOG_UART_CLK_HZ     (160000000U)
+#else
 #define MIN_LOG_UART_CLK_HZ     (48000000U)
+#endif
 #endif
 #ifndef MIN_LOG_BAUD
 #define MIN_LOG_BAUD            (115200U)

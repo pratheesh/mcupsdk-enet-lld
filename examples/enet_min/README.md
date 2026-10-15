@@ -9,10 +9,13 @@ management through the TISCI firmware), CacheP/ClockP, Pinmux and DebugP.
 | File | What it is |
 |---|---|
 | `cpsw_min.c/.h` | CPSW3G: ALE bypass, host port, MAC ports 1/2, DP83867 or DP83869 PHY (by PHY ID), MDIO manual mode |
+| `cpsw_min_cpdma.c` | Same API on the AM261x CPSW3G with CPDMA instead of PKTDMA, fixed-link MII, no MDIO (see below) |
+| `cpsw_min_cpdma_regs.h`, `cpsw_min_cpdma_csl_check.c` | AM261x register map, and a build-time check of it against the Enet LLD CSL headers |
 | `icssg_min.c/.h` | ICSSG dual-MAC firmware load/config, one slice per object, DP83869 PHY |
 | `cpsw_min_example.c` | CPSW port 1 echo + 1 s broadcast test frame |
 | `icssg_min_example.c` | ICSSG1 port 1 echo + 1 s broadcast test frame |
 | `{cpsw,icssg}/am243x-{evm,lp}/r5fss0-0_nortos` | Projects (hello_world SysConfig: UART log, MPU, clocks only) |
+| `{cpsw,cpsw_lean}/am261x-lp/r5fss0-0_nortos` | LP-AM261 projects (hello_world SysConfig plus I2C0, an uncached CPPI descriptor window) |
 | `min_log.c/.h` | Polled UART0 console with an integer-only formatter; replaces the DPL log backend |
 | `{cpsw,icssg}_lean/am243x-{evm,lp}/r5fss0-0_nortos` | Same examples without the SysConfig UART/CCS log, printf or stdio; 1 KB heap, 4 KB stack |
 | `hello_lean.c`, `hello_lean/am243x-evm/r5fss0-0_nortos` | nortos hello_world on `min_log.c` (no UART driver, printf or stdio): the SDK floor the lean examples build on |
@@ -43,6 +46,7 @@ both CPSW and ICSSG1 are the same on both boards.
   `CpswMin_recv()` when no frame is pending, which keeps the RX buffer
   invalidate off the echo path. The CPSW echo examples use it; build with
   `-DCPSW_MIN_ECHO_COPY` for the copying echo.
+* `-DCPSW_MIN_TESTER` (cpsw_min_example.c) turns the example into an echo tester: 2 s after link up it runs the probe, RTT and throughput tests of the SOEM `echo_test.c` against a far-end echo and prints the same `ECHO ...` lines (`ECHO RESULT PASS/FAIL`), then idles.
 * Rings, channels, flows and PSI-L pairing are set up with the SDK
   Sciclient RM calls, so the resources must be assigned to r5fss0-0 in
   the board configuration (they are by default).
@@ -58,6 +62,30 @@ both CPSW and ICSSG1 are the same on both boards.
 * Multi-instance: CPSW takes up to two MAC ports in `CpswMin_Cfg.port[]`;
   ICSSG takes one object per slice (ICSSG0 = one more row in the SoC
   resource table in `icssg_min.c`).
+
+## AM261x (LP-AM261, `-DENET_MIN_BOARD_AM261X_LP`)
+
+`cpsw_min_cpdma.c` implements the same `CpswMin_*` API on the AM261x CPSW3G,
+which moves packets with the CPDMA instead of the PKTDMA: one TX and one RX
+channel (channel 0) over linked CPPI 3.0 descriptors, polled. There is no
+Sciclient. Differences from the AM243x driver:
+
+* MAC port 2 is a fixed 100 Mb/s full-duplex MII link
+  (`CpswMin_PortCfg.fixedSpeed`); MDIO is never touched (the CPSW MDC pad is
+  not level-shifted on the LP-AM261 RevE2) and `CpswMin_poll()` always reports
+  link up. The DP83826E add-on card autonegotiates by itself.
+* The descriptors are in the uncached `.bss:ENET_CPPI_DESC` section (an 8 KB
+  CPPI_DESC memory region plus a NonCached MPU region in the project
+  SysConfig) because the CPDMA updates them in place. Packet buffers stay in
+  cached OCRAM with explicit cache maintenance.
+* The example drives the Eth Conn 0 pads GPIO87..102 as MII2, returns the two
+  IO expander pins that route MDIO to their board defaults over I2C0, and
+  logs U42. See `AM261X-PORT.md` for the design, the verified register list
+  and the hardware status.
+
+Build with the AM261x SDK, for example
+`gmake cpsw_min_example.release.out MCU_PLUS_SDK_PATH=<sdk>` in
+`cpsw/am261x-lp/r5fss0-0_nortos/ti-arm-clang`.
 
 ## Lean variants
 
